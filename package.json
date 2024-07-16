@@ -24,6 +24,7 @@
   },
   "homepage": "https://github.com/scalable-dynamics/you-say-ai-do#readme",
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240620.0",
     "wrangler": "^3.65.0"
   }
 }
