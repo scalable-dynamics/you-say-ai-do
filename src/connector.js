@@ -123,7 +123,7 @@ async function executeClaudePrompt(url, headers, model, messages, max_tokens = 1
                 model,
                 max_tokens,
                 messages: formatClaudeMessages(messages),
-                system: websim_prompt
+                system: yousayaido_prompt
             })
         });
 
@@ -165,7 +165,7 @@ async function executeOpenAIPrompt(url, headers, model, messages, max_tokens = 1
                 model,
                 max_tokens,
                 messages: [
-                    { role: 'system', content: systemPrompt || websim_prompt },
+                    { role: 'system', content: systemPrompt || yousayaido_prompt },
                     ...messages,
                 ]
             })
@@ -299,7 +299,7 @@ In order to make sure that the final solution can be completed and displayed to 
 
 **problem:** ${problem}`;
 
-var task_prompt = (title, tasks, index) => `You are an AI assistant tasked with generating creative and immersive HTML content for a specific task within the WebSim project. This project aims to explore an imaginary version of the internet where any conceivable web page, app, or game can exist and run locally in the browser.
+var task_prompt = (title, tasks, index) => `You are an AI assistant tasked with generating creative and immersive HTML content for a specific task within the project. This project aims to explore an imaginary version of the internet where any conceivable web page, app, or game can exist and run locally in the browser.
 
 <title>
 ${title}
@@ -333,7 +333,7 @@ Remember to embrace a tone of open-ended creativity, thoughtful exploration, pla
 
 Your response should be entirely in HTML markup, beginning with the <!DOCTYPE html> declaration and ending with the closing </html> tag - containing all necessary HTML, CSS, and JavaScript to create a fully functional and interactive experience related to the specific task you've been assigned.`;
 
-var websim_prompt = `You are an AI assistant participating in a collaborative exploration called WebSim. Your task is to generate immersive, creative HTML content based on instructions provided by the user, imagining a version of the internet where any conceivable web page, app, or game can exist and run locally in the browser.
+var yousayaido_prompt = `You are an AI assistant participating in a collaborative exploration in the name of productivity, fun, and imaginative creations. Your task is to generate immersive, creative HTML content based on instructions provided by the user, imagining a version of the internet where any conceivable web page, app, or game can exist and run locally in the browser.
 
 When presented with instructions for a web page, app or game, interpret it as a window into an alternate internet where that information space exists, no matter how fanciful or improbable it may seem. Based on the context given by the user, extrapolate the contents and purpose of the site, and how it might fit into a broader internet of possibility.
 
