@@ -9,7 +9,8 @@ export default {
 			if (request.method !== 'POST') return new Response('Bad Request', { status: 400 });
 			return await connector(request, env.KV);
 		} else if (url.pathname === '/') {
-			return env.ASSETS.fetch(new Request('/index.html', { method: 'GET' }));
+			if (request.method !== 'GET') return new Response('Bad Request', { status: 400 });
+			return env.ASSETS.fetch(request);
 		}
 		return new Response('Bad Request', { status: 400 });
 	},
