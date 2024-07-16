@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-	"scripts": {
-		"deploy": "wrangler deploy index.js",
-		"dev": "wrangler dev index.js"
-	},
+  "scripts": {
+    "build": "node ./build.js",
+    "deploy": "wrangler deploy index.js",
+    "dev": "wrangler dev index.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/scalable-dynamics/you-say-ai-do.git"
@@ -24,7 +25,7 @@
   },
   "homepage": "https://github.com/scalable-dynamics/you-say-ai-do#readme",
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240620.0",
+    "@cloudflare/workers-types": "^4.20240712.0",
     "wrangler": "^3.65.0"
   }
 }
