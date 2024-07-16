@@ -1,0 +1,29 @@
+{
+  "name": "yousayaido",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+	"scripts": {
+		"deploy": "wrangler deploy index.js",
+		"dev": "wrangler dev index.js"
+	},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scalable-dynamics/you-say-ai-do.git"
+  },
+  "keywords": [
+    "you",
+    "say",
+    "ai",
+    "do"
+  ],
+  "author": "Greg DeCarlo",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/scalable-dynamics/you-say-ai-do/issues"
+  },
+  "homepage": "https://github.com/scalable-dynamics/you-say-ai-do#readme",
+  "devDependencies": {
+    "wrangler": "^3.65.0"
+  }
+}
