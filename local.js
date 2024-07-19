@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const config = require('./config.json');
-const { connector } = require('./connector');
+const { connector } = require('./src/connector');
 
 const server = http.createServer(async (req, res) => {
     const envParams = { get: (key) => config[key] };
@@ -36,16 +36,16 @@ const server = http.createServer(async (req, res) => {
         });
     });
     if (req.url === '/') {
-        const indexPath = path.join(__dirname, 'index.html');
+        const indexPath = path.join(__dirname, 'src', 'app.html');
         await readFile(indexPath, 'text/html');
     } else if (req.url === '/nes.min.css') {
-        const indexPath = path.join(__dirname, 'nes.min.css');
+        const indexPath = path.join(__dirname, 'src', 'nes.min.css');
         await readFile(indexPath, 'text/css');
     } else if (req.url === '/app.css') {
-        const indexPath = path.join(__dirname, 'app.css');
+        const indexPath = path.join(__dirname, 'src', 'app.css');
         await readFile(indexPath, 'text/css');
     } else if (req.url === '/app.js') {
-        const indexPath = path.join(__dirname, 'app.js');
+        const indexPath = path.join(__dirname, 'src', 'app.js');
         await readFile(indexPath, 'text/javascript');
     } else if (req.url === '/api') {
         const response = await connector(apiRequest, envParams);
