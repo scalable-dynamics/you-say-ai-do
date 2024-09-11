@@ -1,11 +1,15 @@
 body {
-    font-family: 'Press Start 2P', cursive;
+    font-family: 'Nunito', sans-serif;
     background-color: #202020;
     color: #ffffff;
     margin: 0;
     padding: 0;
     display: flex;
     min-height: 100vh;
+}
+
+h2.title {
+    padding-top: 5px;
 }
 
 p.title {
@@ -31,6 +35,12 @@ p.title {
     margin-top: 10px;
     margin-left: auto;
     width: 120px;
+}
+
+.toolbar {
+    display: flex;
+    gap: 6px;
+    border-bottom: solid 2px white;
 }
 
 .side-panel {
@@ -108,28 +118,34 @@ h2.title {
 .message-input {
     flex-grow: 1;
     padding: 10px;
-    margin: 20px;
-    margin-top: 0;
+    margin: 0 10px;
     font-family: inherit;
     resize: none;
     min-height: 30px;
     width: auto;
 }
 
+.spacer {
+    flex-grow: 1;
+}
+
 .send-button {
     margin-left: 10px;
     align-self: flex-end;
+    white-space: nowrap;
 }
 
 .control-buttons {
     display: flex;
-    justify-content: flex-end;
-    padding: 10px 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 0 10px;
     background-color: #404040;
+    min-height: 50px;
 }
 
 .control-buttons>label {
-    line-height: 22px;
+    line-height: 100%;
 }
 
 .file-preview,
@@ -141,28 +157,12 @@ h2.title {
     display: none;
 }
 
-.emoji-picker {
-    position: fixed;
-    bottom: 70px;
-    margin-left: 50%;
-    background-color: #505050;
-    border: 2px solid #ffffff;
-    border-radius: 5px;
-    padding: 10px;
-    display: none;
-}
-
-.emoji-button {
-    cursor: pointer;
-    margin: 5px;
-    font-size: 20px;
-}
-
 .main-content {
     flex-grow: 1;
     display: flex;
     flex-direction: column;
     height: 100vh;
+    position: relative;
 }
 
 #dynamicContent {
@@ -178,6 +178,37 @@ h2.title {
     margin: 5px;
 }
 
+.project-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px;
+}
+
+.project-item>*:first-child {
+    flex-grow: 1;
+}
+
+.project-item>*:first-child:hover {
+    background-color: #209cee;
+}
+
+.remove {
+    border-radius: 50%;
+    background-color: #ff0000;
+    color: #ffffff;
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+    padding: 0;
+    opacity: 0;
+}
+
+.project-item:hover .remove {
+    opacity: 1;
+}
+
 .pixelated {
     image-rendering: pixelated;
 }
@@ -187,7 +218,7 @@ h2.title {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    position: fixed;
+    position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
@@ -200,7 +231,7 @@ h2.title {
     color: white;
 }
 
-.loading-dialog::before{
+.loading-dialog::before {
     content: '';
     position: fixed;
     inset: 0;
@@ -307,12 +338,15 @@ h2.title {
 
 @media screen and (max-width: 768px) {
 
-    .control-buttons button>span,
-    #emojiButton {
+    #downloadContent span {
         display: none;
     }
 
     .control-buttons>label {
-        line-height: 50px;
+        line-height: 100%;
+    }
+
+    .spacer {
+        display: none;
     }
 }

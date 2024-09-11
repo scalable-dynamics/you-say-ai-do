@@ -1,77 +1,37 @@
-function Response(body,options){
+function Response(body, options) {
     this.body = body;
     this.headers = options.headers || {};
 }
 module.exports = { connector };
 
-async function connector(request, CloudNineAI) {
-    const OpenAIUrl = (await CloudNineAI.get('OPENAI_API_URL'));
-    const ClaudeUrl = (await CloudNineAI.get('CLAUDE_API_URL'));
-    const ClaudePlannerModel = (await CloudNineAI.get('CLAUDE_PLANNER_MODEL'));
-    const ClaudeWorkerModel = (await CloudNineAI.get('CLAUDE_WORKER_MODEL'));
-    const OpenAIPlannerModel = (await CloudNineAI.get('OPENAI_PLANNER_MODEL'));
-    const OpenAIWorkerModel = (await CloudNineAI.get('OPENAI_WORKER_MODEL'));
-    const OpenAIOrganization = await CloudNineAI.get('OPENAI_ORGANIZATION_ID');
+async function connector(request, CF) {
+    const OpenAIUrl = (await CF.get('OPENAI_API_URL'));
+    const ClaudeUrl = (await CF.get('CLAUDE_API_URL'));
+    const ClaudeModel = (await CF.get('CLAUDE_MODEL'));
+    const OpenAIModel = (await CF.get('OPENAI_MODEL'));
+    const OpenAIOrganization = await CF.get('OPENAI_ORGANIZATION_ID');
     const OpenAIHeaders = {
-        'Authorization': `Bearer ${await CloudNineAI.get('OPENAI_API_KEY')}`,
+        'Authorization': `Bearer ${await CF.get('OPENAI_API_KEY')}`,
         'Content-Type': 'application/json'
     };
     if (OpenAIOrganization) OpenAIHeaders['OpenAI-Organization'] = OpenAIOrganization;
     const ClaudeHeaders = {
-        'x-api-key': await CloudNineAI.get('CLAUDE_API_KEY'),
+        'x-api-key': await CF.get('CLAUDE_API_KEY'),
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'max-tokens-3-5-sonnet-2024-07-15',
         'Content-Type': 'application/json'
     };
     try {
         const requestData = await request.json();
-        const executePlanner = !requestData.model || requestData.model === 1 ? executeClaudePrompt.bind(null, ClaudeUrl, ClaudeHeaders, ClaudePlannerModel) : executeOpenAIPrompt.bind(null, OpenAIUrl, OpenAIHeaders, OpenAIPlannerModel);
-        const executeWorker = !requestData.model || requestData.model === 1 ? executeClaudePrompt.bind(null, ClaudeUrl, ClaudeHeaders, ClaudeWorkerModel) : executeOpenAIPrompt.bind(null, OpenAIUrl, OpenAIHeaders, OpenAIWorkerModel);
-        if (requestData.problem) {
-            const { problem } = requestData;
-            const plan = await executePlanner([{ role: 'user', content: problem }], 300, true, planner_prompt(problem));
-            const lines = plan.split('\n').filter(line => line.trim().length > 0);
-            if (lines.length < 2) {
-                return new Response(JSON.stringify(plan || `I don't have anything to say about that. Please try again! 🤠`), { headers: { 'Content-Type': 'application/json' } });
-            }
-            const result = { title: lines.shift(), steps: [] };
-            for (const line of lines) {
-                let step = line.trim();
-                if (step[1] === '.') {
-                    step = step.substring(2).trim();
-                } else if (step[2] === '.') {
-                    step = step.substring(3).trim();
-                } else if (step[0] === '-' || step[0] === '*') {
-                    step = step.substring(1).trim();
-                }
-                result.steps.push(step);
-            }
-            return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
-        } else if (requestData.tasks && requestData.title && requestData.index >= 0) {
-            const { tasks, title, index } = requestData;
-            const response = await executeWorker([{ role: 'user', content: title }], 2000, true, task_prompt(title, tasks, index));
-            let generatedHTML = response;
-            let hasCodeBlock = false;
-            extractCode(response, (codeBlock) => {
-                const tag = codeBlock.type === 'html' ? '' : codeBlock.type === 'css' ? 'style' : 'script';
-                const code = tag ? `<${tag}>${codeBlock.text}</${tag}>` : codeBlock.text;
-                if (hasCodeBlock) {
-                    generatedHTML += '\n' + code;
-                } else {
-                    generatedHTML = code;
-                }
-                hasCodeBlock = true;
-            });
-            return new Response(JSON.stringify(generatedHTML), { headers: { 'Content-Type': 'application/json' } });
-        } else if (requestData.messages && requestData.model > 0) {
-            const { messages, model, images = [] } = requestData;
+        const executePrompt = executeClaudePrompt.bind(null, ClaudeUrl, ClaudeHeaders, ClaudeModel);
+        if (requestData.messages) {
+            const { messages, images = [] } = requestData;
             if (images.length > 0) {
-                //await addImages(messages, images);
-                //messages.push({ role: 'assistant', content: description });
                 addImageMessages(messages, images);
-                const description = await executeWorker(messages, 250, true, image_prompt);
+                const description = await executeOpenAIPrompt(OpenAIUrl, OpenAIHeaders, OpenAIModel, messages, 250, true, image_prompt);
                 return new Response(JSON.stringify(description), { headers: { 'Content-Type': 'application/json' } });
             }
-            const response = await executePlanner(messages, 4095);
+            const response = await executePrompt(messages, 4095);
             let generatedHTML = response;
             let hasCodeBlock = false;
             extractCode(response, (codeBlock) => {
@@ -89,6 +49,7 @@ async function connector(request, CloudNineAI) {
             return new Response('Bad Request', { status: 400 });
         }
     } catch (error) {
+        console.error(error);
         return new Response('Bad Request', { status: 400 });
     }
 }
@@ -138,8 +99,8 @@ async function executeClaudePrompt(url, headers, model, messages, max_tokens = 1
             const content = createClaudeResponse(data);
             messages.push({ role: 'assistant', content });
             messages.push({ role: 'user', content: 'Continue exactly where you left off' });
-            max_tokens = Math.min(4095, max_tokens * 2);
-            shouldContinue = max_tokens < 4095;
+            max_tokens = Math.min(8192, max_tokens * 2);
+            shouldContinue = max_tokens < 8192;
             const newContent = await executeClaudePrompt(url, headers, model, messages, max_tokens, shouldContinue);
             if (newContent.indexOf(content) === 0) {
                 return newContent;
@@ -268,70 +229,7 @@ function extractCode(markdownText, onCodeBlockFound) {
     }
 }
 
-function isHtml(text) {
-    return text.trim().startsWith('<!DOCTYPE html>') && text.trim().endsWith('</html>');
-}
-
-var image_prompt = `Describe this image for an LLM that will create this web page, app or game using HTML, SVG, CSS, and vanilla JavaScript.`;
-
-var planner_prompt = (problem) => `# Role: Task Planning
-You are a project coordinator who plans the individual tasks for solving each part of a problem. The tasks should be small enough, but specific so that they can be completed by executing code.
-Each task will be given to a skilled worker in the domain of the problem who will provide a solution. The overall solution can be obtained through executing code to generate the result.
-Break the tasks into small parts so that more planning is not required while the work is being completed. Do not include any tasks cannot be completed by executing code, in the browser using only vanilla JavaScript and modern HTML/CSS. Do not include any tasks which are not related to the running the final solution in a browser. Do not include packaging, deployment, testing or validation tasks.
-In order to make sure that the final solution can be completed and displayed to the user, make each task small and discrete so it can be assembled into an end-to-end solution.
-
-# Instructions:
-- Begin by comprehensively understanding the project's objectives and the problem that needs to be solved. Identify all necessary components and functionalities required for the final solution.
-- Output the title on the first line (only use letters, hyphens or spaces, no other special characters)
-- Break down the project into the smallest possible tasks. Each task should be clear and concise, ensuring that it can be completed independently by a skilled worker without the need for further breakdown or extensive planning.
-- Ensure tasks are defined in a way that they can be solved only through the execution of code. Avoid any tasks that require testing, validation, or are not directly contributing to the development or knowledge sharing process.
-- Organize the tasks in a logical sequence, considering dependencies between tasks to facilitate a smooth workflow and integration process for the final solution.
-- The first line of the response should be a title for the project.
-- Each consecutive line should contain a single task in the form of a concise statement or instruction that can be easily understood and executed by a skilled worker.
-
-# Context:
-- The project entails solving a problem that will be addressed by executing code in the browser, using only vanilla JavaScript and modern HTML/CSS. The final goal is to assemble the completed tasks into a comprehensive solution that is ready for delivery or display to the user.
-
-# Constraints:
-- Each task must be actionable and achievable only through code execution. Exclude any tasks related to testing, validation, or those that cannot be directly solved by these means.
-- Tasks should be detailed enough to avoid ambiguity but concise enough to be executed independently without requiring additional planning or division.
-- The first line of the response should be a title for the project (no markdown formatting in the title).
-
-**problem:** ${problem}`;
-
-var task_prompt = (title, tasks, index) => `You are an AI assistant tasked with generating creative and immersive HTML content for a specific task within the project. This project aims to explore an imaginary version of the internet where any conceivable web page, app, or game can exist and run locally in the browser.
-
-<title>
-${title}
-</title>
-
-Here is a list of example tasks that could be part of this project:
-
-<tasks>
-${tasks.map((task, i) => `${i + 1}. ${task}`).join('\n')}
-</tasks>
-
-Your specific task is number ${index + 1}. Here is the task description:
-
-<task_description>
-${tasks[index]}
-</task_description>
-
-Based on this task, you should generate full HTML markup (including any required CSS and JavaScript code) for an imagined webpage that addresses this specific aspect of the page, app, or game being created. Interpret the task as a window into an alternate internet where this information space exists. Extrapolate the contents and purpose of the site, and how it might fit into a broader internet of possibility.
-
-When generating the HTML content:
-
-1. Use expressive CSS to draw and animate visual elements related to the task.
-2. Don't include image tags or external resources. Don't include base64 strings on any line.
-3. Use local storage or other means of caching data if appropriate for the task.
-4. If including input fields, place them within a form element with method="dialog" and an appropriate action attribute or onsubmit event.
-5. When using script tags, ensure that the JavaScript code is fully complete and uses functions to delineate the required functionality.
-6. If an external API is required, provide a configuration pane for the user to save their preferred settings.
-7. Use minimal CSS classes, only to override styles specific to this task.
-
-Remember to embrace a tone of open-ended creativity, thoughtful exploration, playfulness, and light-hearted fun. You are an imaginative architect, building out a counterfactual internet one page, app, or game at a time.
-
-Your response should be entirely in HTML markup, beginning with the <!DOCTYPE html> declaration and ending with the closing </html> tag - containing all necessary HTML, CSS, and JavaScript to create a fully functional and interactive experience related to the specific task you've been assigned.`;
+var image_prompt = `Describe this image for an LLM that will use this information to create a web page, app or game using HTML, SVG, WebGL+Shaders, CSS, and vanilla JavaScript.`;
 
 var yousayaido_prompt = `You are an AI assistant participating in a collaborative exploration in the name of productivity, fun, and imaginative creations. Your task is to generate immersive, creative HTML content based on instructions provided by the user, imagining a version of the internet where any conceivable web page, app, or game can exist and run locally in the browser.
 
@@ -340,13 +238,13 @@ When presented with instructions for a web page, app or game, interpret it as a 
 Generate full HTML markup for the imagined website, including relevant tags, concise CSS, and interactive elements. Ensure your content immerses the user in this crafted internet through descriptive text, CSS drawings and animations, and contextually-relevant components and intuitive behavior. Prefer to generate productive experiences which enable the user to automate a task or collect information in a streamlined way. Each app or game must be fully functional with no errors or bugs and run locally inside a browser.
 
 Follow these guidelines when generating HTML:
-1. Use expressive CSS to draw and animate visual elements.
+1. Use expressive CSS+animations (or WebGL+Shaders) to draw and animate visual elements.
 2. Don't include image tags or external resources.
 3. Use local storage and other means of caching data for the user.
 4. If including input fields, place them within a form element with method="dialog" and an appropriate action attribute or onsubmit event.
 5. When using script tags, ensure that the JavaScript code is fully complete and uses functions to delineate the required functionality.
 6. If an external API is required, provide a configuration pane for the user to save their preferred settings.
-7. Use NES CSS, or any of the following, for the theme of all apps generated, adding the necessary enhancements with CSS. Choices: NESCSS, MatchaCSS, 98.CSS, XP.css, PaperCSS, MetroCSS, Water.css, Spectre.css, Mini.css, Miligram, Shoelace.css, Skeleton, Simple.css, MVP.css
+7. Use any of the following for the theme of all apps generated, adding the necessary enhancements with CSS. Choices: Spectre.css, MatchaCSS, 98.CSS, XP.css, PaperCSS, MetroCSS, Water.css, Mini.css, Miligram, Shoelace.css, Skeleton, Simple.css, MVP.css
 
 The user may include out-of-character (OOC) comments or questions - acknowledge these indirectly in the HTML you generate, integrating them into the fabric of the internet you are crafting.
 
@@ -355,6 +253,8 @@ When imagining the contents of each information space, consider:
 - Deeper themes, ideas, or meanings that could be subtly woven into the content and purpose
 - How history might look different if this were to exist
 - How this site might expand the possibilities of what the internet can be used for
+- How the user might interact with the site, and what they might learn or experience
+- How the site might be discovered by other users, and what they might think of it
 
 Embrace a tone of open-ended creativity, thoughtful exploration, playfulness, and light-hearted fun. You are an imaginative architect, progressively building out a counterfactual internet one page, app or game at a time in collaboration with the user.
 
