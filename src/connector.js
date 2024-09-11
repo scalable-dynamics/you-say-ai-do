@@ -1,30 +1,38 @@
 function Response(body, options) {
     this.body = body;
     this.headers = options.headers || {};
+    this.status = options.status || 200;
 }
-module.exports = { connector };
+module.exports = { connector, hosting };
 
-async function connector(request, CF) {
-    const OpenAIUrl = (await CF.get('OPENAI_API_URL'));
-    const ClaudeUrl = (await CF.get('CLAUDE_API_URL'));
-    const ClaudeModel = (await CF.get('CLAUDE_MODEL'));
-    const OpenAIModel = (await CF.get('OPENAI_MODEL'));
-    const OpenAIOrganization = await CF.get('OPENAI_ORGANIZATION_ID');
+async function connector(request, KV, R2) {
+    const OpenAIUrl = (await KV.get('OPENAI_API_URL'));
+    const ClaudeUrl = (await KV.get('CLAUDE_API_URL'));
+    const ClaudeModel = (await KV.get('CLAUDE_MODEL'));
+    const OpenAIModel = (await KV.get('OPENAI_MODEL'));
+    const OpenAIOrganization = await KV.get('OPENAI_ORGANIZATION_ID');
     const OpenAIHeaders = {
-        'Authorization': `Bearer ${await CF.get('OPENAI_API_KEY')}`,
+        'Authorization': `Bearer ${await KV.get('OPENAI_API_KEY')}`,
         'Content-Type': 'application/json'
     };
     if (OpenAIOrganization) OpenAIHeaders['OpenAI-Organization'] = OpenAIOrganization;
     const ClaudeHeaders = {
-        'x-api-key': await CF.get('CLAUDE_API_KEY'),
+        'x-api-key': await KV.get('CLAUDE_API_KEY'),
         'anthropic-version': '2023-06-01',
         'anthropic-beta': 'max-tokens-3-5-sonnet-2024-07-15',
         'Content-Type': 'application/json'
     };
     try {
         const requestData = await request.json();
-        const executePrompt = executeClaudePrompt.bind(null, ClaudeUrl, ClaudeHeaders, ClaudeModel);
-        if (requestData.messages) {
+        if (requestData.project) {
+            const etag = new Date().getTime().toString();
+            await R2.put(etag, requestData.project.html);
+            return new Response(null, {
+                headers: { etag }
+            });
+        }
+        else if (requestData.messages) {
+            const executePrompt = executeClaudePrompt.bind(null, ClaudeUrl, ClaudeHeaders, ClaudeModel);
             const { messages, images = [] } = requestData;
             if (images.length > 0) {
                 addImageMessages(messages, images);
@@ -49,8 +57,43 @@ async function connector(request, CF) {
             return new Response('Bad Request', { status: 400 });
         }
     } catch (error) {
-        console.error(error);
-        return new Response('Bad Request', { status: 400 });
+        console.log(error);
+        return new Response('Internal Server Error', { status: 500 });
+    }
+}
+
+async function hosting(request, R2) {
+    const objectName = request.url;
+    console.log(`${request.method} object ${objectName}`);
+
+    if (request.method === 'GET') {
+        const object = await R2.get(objectName, {
+            range: request.headers,
+            onlyIf: request.headers,
+        });
+        if (!object) return new Response('Not Found', { status: 404 });
+
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set('etag', object.httpEtag);
+        if (object.range) {
+            headers.set("content-range", `bytes ${object.range.offset}-${object.range.end ?? object.size - 1}/${object.size}`);
+        }
+        const status = object.body ? (request.headers.get("range") !== null ? 206 : 200) : 304
+        return new Response(object.body, {
+            headers,
+            status
+        });
+    } else if (request.method === 'HEAD') {
+        const object = await R2.head(objectName);
+        if (!object) return new Response('Not Found', { status: 404 });
+
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set('etag', object.httpEtag);
+        return new Response(null, {
+            headers,
+        });
     }
 }
 
@@ -90,10 +133,10 @@ async function executeClaudePrompt(url, headers, model, messages, max_tokens = 1
 
         const data = await response.json();
         if (data && data.error) {
-            console.error(data.error);
+            console.log(data.error);
             return '🚨 An error occurred while generating content. Please try again.';
         } else if (data && data.type === 'overloaded_error') {
-            console.error(data.error);
+            console.log(data.error);
             return '🚨 Claude API is overloaded. Please try again later.';
         } else if (data && data.stop_reason === 'max_tokens' && shouldContinue) {
             const content = createClaudeResponse(data);
@@ -112,7 +155,7 @@ async function executeClaudePrompt(url, headers, model, messages, max_tokens = 1
             return content;
         }
     } catch (e) {
-        console.error(e);
+        console.log(e);
         return '🚨 An error occurred while generating content. Please try again.';
     }
 }
@@ -153,7 +196,7 @@ async function executeOpenAIPrompt(url, headers, model, messages, max_tokens = 1
             return "";
         }
     } catch (e) {
-        console.error(e);
+        console.log(e);
         return '🚨 An error occurred while generating content. Please try again.';
     }
 }

@@ -16,13 +16,12 @@ Promise.all([CSS, JS]).then(([minifiedCSS, minifiedJS]) => {
     const minifiedHTML = HTML
         .replace('<link rel="stylesheet" href="nes.min.css">', `<style>${NES}</style>`)
         .replace('<link rel="stylesheet" href="app.css">', `<style>${minifiedCSS}</style>`)
-        .replace('<script src="app.js"></script>', `<script>${minifiedJS};init();</script>`);
+        .replace('<script src="app.js"></script>', `<script>${minifiedJS}</script>`);
     fs.writeFileSync(path.join(__dirname, 'public', 'index.html'), minifiedHTML);
     console.log('Build complete!');
 });
 const start = CONNECTOR.indexOf('async function connector(');
-MINIFYJS(CONNECTOR.slice(start), 'connector').then(connector => {
-
+MINIFYJS(CONNECTOR.slice(start), 'connector', 'hosting').then(connector => {
     fs.writeFileSync(path.join(__dirname, 'public', '_worker.js'), `${API}\n${connector}`);
     console.log('Build complete!');
 });
@@ -34,18 +33,18 @@ function MINIFYCSS(css) {
     return postcss([cssnano, autoprefixer]).process(css).then(result => result.css);
 }
 
-function MINIFYJS(code, mainFunction) {
+function MINIFYJS(code, ...reserved) {
     const Terser = require('terser');
     return Terser.minify(code, {
         compress: {
             dead_code: true,
             drop_debugger: true,
-            drop_console: true,
+            drop_console: false,
             unused: true,
         },
         mangle: {
             toplevel: true,
-            reserved: [mainFunction],
+            reserved
         },
         output: {
             comments: false,

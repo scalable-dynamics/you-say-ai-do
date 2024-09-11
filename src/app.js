@@ -2,6 +2,7 @@
 const togglePanel = document.getElementById('toggleConversation');
 const shareButton = document.getElementById('shareButton');
 const backButton = document.getElementById('backButton');
+const projectTitle = document.getElementById('projectTitle');
 const chatMessages = document.getElementById('chatMessages');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
@@ -191,7 +192,6 @@ function addMessage(content, isSent, ...children) {
     chatMessages.appendChild(messageElement);
     chatMessages.scrollTop = chatMessages.scrollHeight;
     if (children && children.length > 0) {
-        console.log('message children:', children);
         for (const child of children) {
             if (!child) continue;
             messageElement.appendChild(child);
@@ -239,7 +239,7 @@ async function sendMessage(user = false) {
     let value = messageInput.value.trim();
     if (loadImages.length > 0) {
         if (value) value += '\n---\n';
-        value += 'Make it like this:\n';
+        value += 'Use this for inspiration:\n';
         const images = await Promise.all(loadImages);
         const description = await executePrompt('Analyzing Images...', currentProject.messages, images);
         value += description;
@@ -349,7 +349,22 @@ function previewHTML(htmlContent) {
     iframeDoc.close();
     currentProject.html = htmlContent;
     currentProject.title = getHtmlTitle(htmlContent) || currentProject.title;
+    projectTitle.innerText = trimText(currentProject.title);
     saveProject(currentProject);
+    if (currentProject.shared) {
+        fetch(currentProject.shared, {
+            method: 'HEAD'
+        }).then(response => {
+            if (response.status === 200) {
+                shareButton.innerText = '✅';
+            } else {
+                shareButton.innerText = '🔗';
+                currentProject.shared = undefined;
+            }
+        });
+    } else {
+        shareButton.innerText = '🔗';
+    }
 }
 
 // Function to execute a prompt
@@ -448,6 +463,27 @@ togglePanel.addEventListener('click', () => {
 
 backButton.addEventListener('click', () => {
     toggleWorkspace(false);
+});
+
+shareButton.addEventListener('click', async () => {
+    if (!currentProject.shared) {
+        const response = await fetch('/api', {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            method: 'POST',
+            body: JSON.stringify({
+                project: currentProject
+            })
+        });
+        const etag = response.headers.get('etag');
+        currentProject.shared = `/shared/${etag}`;
+        saveProject(currentProject);
+        shareButton.innerText = '✅';
+    } else {
+        const win = window.open(currentProject.shared, '_blank');
+        win.focus();
+    }
 });
 
 sendButton.addEventListener('click', () => sendMessage(true));

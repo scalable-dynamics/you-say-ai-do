@@ -59,6 +59,15 @@ To install and run You Say AI Do locally, follow these steps:
     - Use additional prompts and multimedia inputs to iterate on the design and behavior.
     - View real-time updates as you make changes.
 
+## Deployment to CloudFlare workers and R2 storage
+
+```bash
+node ./build.js
+npx wrangler pages deploy ./public
+```
+
+> Note: Configuration KV and R2 Storage must be configured.
+
 ## Contributing
 
 We welcome contributions from the community! To contribute:
