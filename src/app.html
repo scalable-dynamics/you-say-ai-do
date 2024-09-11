@@ -15,32 +15,23 @@
         <textarea id="aiPrompt" class="nes-textarea"
             placeholder="Type an idea for any webpage, app, or game..."></textarea>
         <button id="generateContent" class="nes-btn is-primary">🤯 Create</button>
-        <div style="flex-grow:1;"></div>
-        <div>
-            <label for="useClaude">
-                <input type="checkbox" id="useClaude" checked>
-                Use Claude
-            </label>
-            &nbsp;&nbsp;
-            <label for="usePlanner">
-                <input type="checkbox" id="usePlanner">
-                Use Planner
-            </label>
-        </div>
         <div style="flex-grow:1;">
             <hr />
         </div>
-        <button id="continueButton" class="nes-btn" style="display: none;">▶️ Continue</button>
-    </div>
-    <div id="sidePanel" class="side-panel" style="display: none;">
-        <div style="display:flex;gap:6px;border-bottom:solid 2px white;">
-            <button class="toggle-panel nes-btn">≡</button>
-            <h2 class="title" style="flex-grow:1">YouSayAIDo.com</h2>
-        </div>
-        <div id="chatMessages" class="chat-messages"></div>
+        <div id="projectList" class="project-list"></div>
     </div>
     <div id="mainContent" class="main-content" style="display: none;">
-        <div id="errorMessage" class="nes-error" style="display: none;"></div>
+        <div class="toolbar">
+            <div id="errorMessage" class="nes-error" style="display: none;"></div>
+            <button id="backButton" class="nes-btn" title="Go Back">
+                <span>⏪</span>
+            </button>
+            <h2 id="projectTitle" class="title" style="flex-grow:1">YouSayAIDo.com</h2>
+            <button id="shareButton" class="nes-btn" title="Share Link">
+                <span>🔗</span>
+            </button>
+            </button>
+        </div>
         <div id="dynamicContent"></div>
         <div class="input-container">
             <div id="audioVisualizer" class="audio-visualizer"></div>
@@ -51,19 +42,24 @@
                 <input type="file" id="attachButton" style="display: none;">
                 <label for="attachButton" title="Attach files" class="nes-btn">📎</label>
                 <button id="audioButton" title="Talk about it" class="nes-btn">🎙️</button>
-                <button id="emojiButton" title="Express yourself" class="nes-btn">😊</button>
-                <div style="flex-grow:1;"></div>
+                <div class="spacer"></div>
                 <button id="improveContent" class="nes-btn">🔮<span> Improve</span></button>
                 <button id="downloadContent" class="nes-btn">⏬<span> Download</span></button>
-                <div style="flex-grow:1;"></div>
+                <div class="spacer"></div>
                 <button id="sendButton" class="send-button nes-btn is-primary">🪄 Update</button>
             </div>
-            <div id="emojiPicker" class="emoji-picker" style="display: none;"></div>
+        </div>
+        <div id="loaderContainer" class="loading-dialog nes-container" style="display: none;">
+            <div class="loading-bar"></div>
+            <div class="loader"></div>
         </div>
     </div>
-    <div id="loaderContainer" class="loading-dialog nes-container" style="display: none;">
-        <div class="loading-bar"></div>
-        <div class="loader"></div>
+    <div id="sidePanel" class="side-panel" style="display: none;">
+        <div class="toolbar">
+            <h2 class="title" style="flex-grow:1">YouSayAIDo.com</h2>
+            <button id="toggleConversation" class="nes-btn">≡</button>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
     </div>
     <script src="app.js"></script>
 </body>

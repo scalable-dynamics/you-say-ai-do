@@ -35,10 +35,8 @@ To install and run You Say AI Do locally, follow these steps:
     "OPENAI_ORGANIZATION_ID": "org-XXXXXXXX",
     "OPENAI_API_URL": "https://api.openai.com/v1",
     "CLAUDE_API_URL": "https://api.anthropic.com/v1",
-    "CLAUDE_PLANNER_MODEL": "claude-3-5-sonnet-20240620",
-    "CLAUDE_WORKER_MODEL": "claude-3-5-sonnet-20240620",
-    "OPENAI_PLANNER_MODEL": "gpt-4",
-    "OPENAI_WORKER_MODEL": "gpt-4o-mini"
+    "CLAUDE_MODEL": "claude-3-5-sonnet-20240620",
+    "OPENAI_MODEL": "gpt-4o"
 }
     ```
 4. **Run the application**
@@ -60,6 +58,15 @@ To install and run You Say AI Do locally, follow these steps:
 3. **Iterate and refine**:
     - Use additional prompts and multimedia inputs to iterate on the design and behavior.
     - View real-time updates as you make changes.
+
+## Deployment to CloudFlare workers and R2 storage
+
+```bash
+node ./build.js
+npx wrangler pages deploy ./public
+```
+
+> Note: Configuration KV and R2 Storage must be configured.
 
 ## Contributing
 

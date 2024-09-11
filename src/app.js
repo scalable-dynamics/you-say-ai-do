@@ -1,42 +1,146 @@
 // Define the necessary elements
-const togglePanel = document.querySelector('.toggle-panel');
+const togglePanel = document.getElementById('toggleConversation');
+const shareButton = document.getElementById('shareButton');
+const backButton = document.getElementById('backButton');
+const projectTitle = document.getElementById('projectTitle');
 const chatMessages = document.getElementById('chatMessages');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
 const attachButton = document.getElementById('attachButton');
 const audioButton = document.getElementById('audioButton');
-const emojiButton = document.getElementById('emojiButton');
 const filePreview = document.getElementById('filePreview');
 const audioVisualizer = document.getElementById('audioVisualizer');
-const emojiPicker = document.getElementById('emojiPicker');
 const dynamicContent = document.getElementById('dynamicContent');
 const errorMessage = document.getElementById('errorMessage');
 const aiPrompt = document.getElementById('aiPrompt');
 const generateContent = document.getElementById('generateContent');
-const usePlanner = document.getElementById('usePlanner');
-const useClaude = document.getElementById('useClaude');
 const loaderContainer = document.getElementById('loaderContainer');
 const startContent = document.getElementById('startContent');
 const sidePanel = document.getElementById('sidePanel');
 const mainContent = document.getElementById('mainContent');
 const downloadContent = document.getElementById('downloadContent');
 const improveContent = document.getElementById('improveContent');
-const continueButton = document.getElementById('continueButton');
+const projectList = document.getElementById('projectList');
 
 let isRecording = false;
 let mediaRecorder;
 let recordingSendTimer;
 let audioChunks = [];
-let currentMessages = [];
-let currentPlan = [];
-let currentInstructions = '';
-let currentTitle = '';
-let currentHTML = '';
 let speechRecognition;
 let selectedFiles = [];
 let loaderCount = 0;
 
-// Function to auto resize textarea
+// Project management
+let currentProject = { messages: [] };
+
+async function getProjects() {
+    const file = await loadFileFromCache('projects.json');
+    if (file) {
+        console.log('Loaded projects from cache:', file.name);
+        const text = await file.text();
+        return JSON.parse(text);
+    } else {
+        console.log('Projects not found in cache!');
+        return [];
+    }
+}
+
+async function saveProject(project) {
+    const projects = await getProjects();
+    const index = projects.findIndex(p => p.id === project.id);
+    if (index !== -1) {
+        projects[index] = project;
+    } else {
+        projects.push(project);
+    }
+    await saveToCache(new File([JSON.stringify(projects)], 'projects.json', { type: 'application/json' }));
+}
+
+async function createNewProject(title) {
+    const id = Date.now().toString();
+    const newProject = {
+        id,
+        title,
+        html: '',
+        messages: [],
+        createdOn: getFormattedTime(),
+        savedOn: getFormattedTime()
+    };
+    await saveProject(newProject);
+    return newProject;
+}
+
+async function openProject(id) {
+    const projects = await getProjects();
+    const project = projects.find(p => p.id === id);
+    if (project) {
+        currentProject = project;
+        updateUIForProject(project);
+    } else {
+        console.error('Project not found:', id);
+        alert('Project not found!');
+    }
+}
+
+function updateUIForProject(project) {
+    toggleWorkspace(true);
+    chatMessages.innerHTML = '';
+    for (const message of project.messages) {
+        addMessage(message.content, message.role === 'user');
+    }
+    if (project.html) {
+        previewHTML(project.html);
+    }
+    aiPrompt.value = project.instructions || '';
+}
+
+async function listProjects() {
+    projectList.innerHTML = '';
+    const projects = await getProjects();
+    for (const project of projects) {
+        const item = document.createElement('div');
+        item.classList.add('project-item');
+        const button = createButton(project.title, () => openProject(project.id));
+        item.appendChild(button);
+        const remove = createButton('X', async () => {
+            if (confirm('Are you sure you want to delete this project?')) {
+                const projects = await getProjects();
+                const index = projects.findIndex(p => p.id === project.id);
+                if (index !== -1) {
+                    projects.splice(index, 1);
+                    await saveToCache(new File([JSON.stringify(projects)], 'projects.json', { type: 'application/json' }));
+                    listProjects();
+                }
+            }
+        });
+        remove.title = 'Delete Project';
+        remove.classList.add('remove');
+        item.appendChild(remove);
+        projectList.appendChild(item);
+    }
+}
+
+function getFormattedTime() {
+    return new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+        hour12: true
+    });
+}
+
+function getFileName(title) {
+    return `${title.replace(/[^a-z0-9- ]/ig, '')}-${Date.now()}.html`;
+}
+
+function getHtmlTitle(html) {
+    const match = html.match(/<title>(.*?)<\/title>/);
+    return match ? match[1] : '';
+}
+
 function autoSizeTextarea(e) {
     const textarea = e.target;
     textarea.style.height = 'auto';
@@ -48,12 +152,20 @@ function trimText(text) {
     return text.length > 100 ? text.slice(0, 100) + '...' : text;
 }
 
+function createButton(text, onClick) {
+    const button = document.createElement('button');
+    button.textContent = text;
+    button.classList.add('btn');
+    button.onclick = onClick;
+    return button;
+}
+
 // Function to create download button for files
 function createDownloadButton(file) {
     const button = document.createElement('a');
     button.dataset.file = file.name;
     button.textContent = 'Download';
-    button.classList.add('nes-btn', 'is-primary');
+    button.classList.add('btn', 'is-primary');
     button.href = URL.createObjectURL(file);
     button.download = file.name;
     button.onclick = () => {
@@ -73,19 +185,22 @@ function addMessage(content, isSent, ...children) {
         children.push(createDownloadButton(file));
     }
     const message = { role: isSent ? 'user' : 'assistant', content };
-    currentMessages.push(message);
     const messageElement = document.createElement('div');
+    messageElement.title = content;
     messageElement.classList.add('message', isSent ? 'sent' : 'received');
     messageElement.innerHTML = `<p>${content.replace(/\n/g, '<br>')}</p>`;
     chatMessages.appendChild(messageElement);
     chatMessages.scrollTop = chatMessages.scrollHeight;
-    for (const child of children) {
-        if (!child) continue;
-        messageElement.appendChild(child);
-        if (child.dataset.file) {
-            message.file = child.dataset.file;
+    if (children && children.length > 0) {
+        for (const child of children) {
+            if (!child) continue;
+            messageElement.appendChild(child);
+            if (child.dataset.file) {
+                message.file = child.dataset.file;
+            }
         }
     }
+    return message;
 }
 
 // Function to preview a file
@@ -106,7 +221,7 @@ async function sendMessage(user = false) {
         for (const file of selectedFiles) {
             const fileText = `File attached: ${file.name} (${file.size} bytes)`;
             const downloadButton = createDownloadButton(file);
-            addMessage(fileText, true, downloadButton);
+            saveProject(currentProject);
             if (file.type.indexOf('image') === 0) {
                 const reader = new FileReader();
                 loadImages.push(new Promise((resolve) => {
@@ -124,31 +239,32 @@ async function sendMessage(user = false) {
     let value = messageInput.value.trim();
     if (loadImages.length > 0) {
         if (value) value += '\n---\n';
-        value += 'Make it like this:\n';
+        value += 'Use this for inspiration:\n';
         const images = await Promise.all(loadImages);
-        const description = await executePrompt('Analyzing Images...', currentMessages, 2, images);
+        const description = await executePrompt('Analyzing Images...', currentProject.messages, images);
         value += description;
     }
     if (value) {
         messageInput.value = '';
         const content = await executePrompt('Generating Content...', [
-            ...currentMessages,
-            { role: 'user', content: currentInstructions },
-            { role: 'assistant', content: currentHTML },
+            ...currentProject.messages,
+            { role: 'user', content: currentProject.instructions },
+            { role: 'assistant', content: currentProject.html },
             { role: 'user', content: value }
         ]);
         if (user) {
-            addMessage(value, true);
+            currentProject.messages.push(addMessage(value, true));
         }
         const message = content.split('<')[0].trim();
         if (message) {
-            addMessage(message);
+            currentProject.messages.push(addMessage(message));
         }
         const html = getHtml(content);
         if (html) {
             previewHTML(html);
         }
     }
+    saveProject(currentProject);
 }
 
 // Function to visualize audio input
@@ -178,12 +294,26 @@ function getHtml(text) {
     const html = getHtmlTag(text, '!DOCTYPE html', 'html');
     if (html) return html;
     const body = getHtmlTag(text, 'script') + getHtmlTag(text, 'style') + getHtmlTag(text, 'div');
-    if (body) return currentHTML.replace('</body>', body + '</body>');
+    if (body && currentProject.html) return currentProject.html.replace('</body>', body + '</body>');
     return '';
+}
+
+function removeContinuation(text) {
+    if (text && text.includes('Certainly!')) {
+        const lines = text.split('\n');
+        const index = lines.findIndex(line => line.includes('Certainly!'));
+        if (index > -1) {
+            lines.splice(index, 1);
+            text = lines.join('\n');
+            console.log('Removed line with Certainly!');
+        }
+    }
+    return text;
 }
 
 // Function to get HTML tag content
 function getHtmlTag(text, startTag, endTag) {
+    text = removeContinuation(text);
     const start = text.indexOf(`<${startTag}>`);
     const end = text.lastIndexOf(`</${endTag || startTag}>`) + 7;
     if (start === -1 || end === -1) return '';
@@ -206,7 +336,7 @@ function previewHTML(htmlContent) {
         errorMessage.textContent = error;
         const button = document.createElement('button');
         button.textContent = '🛠️ Fix it';
-        button.classList.add('nes-btn', 'is-error');
+        button.classList.add('btn', 'is-error');
         button.onclick = () => {
             messageInput.value = error;
             errorMessage.style.display = 'none';
@@ -216,25 +346,29 @@ function previewHTML(htmlContent) {
         errorMessage.style.display = 'block';
     };
     iframeDoc.write(htmlContent);
-    currentTitle = iframeDoc.querySelector('title')?.textContent || 'Generated Content';
-    if (!currentInstructions) currentInstructions = currentTitle;
     iframeDoc.close();
-    setTimeout(() => {
-        const frameHeight = iframeDoc.documentElement.scrollHeight;
-        const contentHeight = dynamicContent.clientHeight;
-        if (frameHeight > contentHeight) {
-            const scale = (contentHeight / frameHeight);
-            iframeDoc.documentElement.style.zoom = scale;
-        }
-    }, 100);
-    currentHTML = htmlContent;
-    saveToCache(new File([htmlContent], 'current.html', { type: 'text/html' }));
-    const messagesJson = JSON.stringify(currentMessages);
-    saveToCache(new File([messagesJson], 'current.json', { type: 'application/json' }));
+    currentProject.html = htmlContent;
+    currentProject.title = getHtmlTitle(htmlContent) || currentProject.title;
+    projectTitle.innerText = trimText(currentProject.title);
+    saveProject(currentProject);
+    if (currentProject.shared) {
+        fetch(currentProject.shared, {
+            method: 'HEAD'
+        }).then(response => {
+            if (response.status === 200) {
+                shareButton.innerText = '✅';
+            } else {
+                shareButton.innerText = '🔗';
+                currentProject.shared = undefined;
+            }
+        });
+    } else {
+        shareButton.innerText = '🔗';
+    }
 }
 
 // Function to execute a prompt
-async function executePrompt(description, messages, model = 1, images) {
+async function executePrompt(description, messages, images) {
     toggleLoader(description);
     let content = '';
     try {
@@ -244,7 +378,6 @@ async function executePrompt(description, messages, model = 1, images) {
             },
             method: 'POST',
             body: JSON.stringify({
-                model: model === 1 && useClaude.checked ? 1 : 2,
                 messages,
                 images
             })
@@ -257,139 +390,6 @@ async function executePrompt(description, messages, model = 1, images) {
         toggleLoader(false);
     }
     return content;
-}
-
-// Function to generate a plan
-async function generatePlan(prompt) {
-    const plan = await getPlan(prompt);
-    if (plan.steps.length === 0) {
-        alert('I am sorry, I could not find a plan for this problem. Please try again with a different prompt.');
-        return;
-    }
-    toggleWorkspace();
-    addMessage(prompt, true);
-    aiPrompt.value = '';
-    currentPlan = plan.steps;
-    if (!currentTitle) currentTitle = plan.title;
-    const stepResults = [];
-    for (let index = 0; index < currentPlan.length; index++) {
-        stepResults.push(getTask(currentTitle, currentPlan, index));
-    }
-    const results = await Promise.all(stepResults);
-    const content = await executePrompt('Combining all steps...', [
-        { role: 'user', content: prompt },
-        { role: 'assistant', content: '```html\n<title>' + currentTitle + '</title>\n<plan>\n' + currentPlan.map((step, index) => `${index + 1}. ${step}`).join('\n\t') + '\n</plan>\n```' },
-        ...results.flatMap((result, index) => ([
-            { role: 'user', content: `**Step ${index + 1}:** ${currentPlan[index]}` },
-            { role: 'assistant', content: isHtml(result) ? '```html\n' + result + '\n```' : result },
-        ])),
-        { role: 'user', content: `Great! Now combine all of these solutions into a single HTML page which contains 100% of the desired functionality, behavior, design, and capabilities. Take this step-by-step, this is going to be epic!` }
-    ], 2);
-    const message = content.split('<')[0].trim();
-    if (message) {
-        addMessage(message);
-    }
-    const html = getHtml(content);
-    if (html) {
-        previewHTML(html);
-    }
-}
-
-function isHtml(text) {
-    return text.trim().startsWith('<') && text.trim().endsWith('</html>');
-}
-
-// Function to get a plan from the server
-async function getPlan(problem) {
-    toggleLoader(true, 'Creating a plan...');
-    let plan = { title: problem, steps: [] };
-    try {
-        const response = await fetch('/api', {
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            method: 'POST',
-            body: JSON.stringify({ problem })
-        });
-        plan = await response.json();
-        loaderContainer.dataset.status = `${plan.title}\n\n${plan.steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`;
-        console.log('Plan:', plan);
-    } catch (e) {
-        console.error('Error getting plan:', e);
-    } finally {
-        toggleLoader(false);
-    }
-    return plan;
-}
-
-// Function to get a task from the server
-async function getTask(title, tasks, index) {
-    toggleLoader(true, `${title}\n\n${tasks.map((step, i) => index === i ? `**${i + 1}. ${step}**` : `${i + 1}. ${step}`).join('\n')}`);
-    let content = '';
-    try {
-        const response = await fetch('/api', {
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            method: 'POST',
-            body: JSON.stringify({ title, tasks, index })
-        });
-        content = await response.json();
-    } catch (e) {
-        console.error('Error executing prompt:', e);
-        content = 'Oops! Something went wrong. 🥹';
-    } finally {
-        toggleLoader(false);
-    }
-    return content;
-}
-
-// Function to save files to cache
-async function saveToCache(file) {
-    try {
-        const cache = await caches.open('fileCache');
-        await cache.put(file.name, new Response(file));
-    } catch (error) {
-        console.error('Error saving file to cache:', error);
-    }
-}
-
-// Function to remove a file from cache
-async function removeFileFromCache(fileName) {
-    try {
-        const cache = await caches.open('fileCache');
-        await cache.delete(fileName);
-    } catch (error) {
-        console.error('Error removing file from cache:', error);
-    }
-}
-
-// Function to load a file from cache
-async function loadFileFromCache(fileName) {
-    try {
-        const cache = await caches.open('fileCache');
-        const response = await cache.match(fileName);
-        if (!response) return '';
-        return new File([await response.blob()], fileName);
-    } catch (error) {
-        console.error('Error loading file from cache:', error);
-    }
-    return '';
-}
-
-// Function to load text from cache
-async function loadTextFromCache(fileName) {
-    try {
-        const cache = await caches.open('fileCache');
-        const response = await cache.match(fileName);
-        if (response) {
-            const text = await response.text();
-            return text;
-        }
-    } catch (error) {
-        console.error('Error loading file from cache:', error);
-    }
-    return '';
 }
 
 // Function to toggle loader display
@@ -411,73 +411,87 @@ function toggleWorkspace(show = true) {
     startContent.style.display = show ? 'none' : 'flex';
     sidePanel.style.display = show ? 'flex' : 'none';
     mainContent.style.display = show ? 'flex' : 'none';
+    if (document.body.clientWidth < 768) {
+        sidePanel.classList.add('collapsed');
+    }
 }
 
-// Function to get a sanitized filename based on title
-function getFileName(title) {
-    return `${title.replace(/[^a-z0-9- ]/ig, '')}-${new Date().getTime()}.html`;
+// Cache management functions
+async function saveToCache(file) {
+    try {
+        const cache = await caches.open('fileCache');
+        await cache.put(file.name, new Response(file));
+    } catch (error) {
+        console.error('Error saving file to cache:', error);
+    }
+}
+
+async function removeFileFromCache(fileName) {
+    try {
+        const cache = await caches.open('fileCache');
+        await cache.delete(fileName);
+    } catch (error) {
+        console.error('Error removing file from cache:', error);
+    }
+}
+
+async function loadFileFromCache(fileName) {
+    try {
+        const cache = await caches.open('fileCache');
+        const response = await cache.match(fileName);
+        if (!response) return null;
+        return new File([await response.blob()], fileName);
+    } catch (error) {
+        console.error('Error loading file from cache:', error);
+    }
+    return null;
 }
 
 // Initialize event listeners and functions
 function init() {
     aiPrompt.focus();
-    loadTextFromCache('current.html').then(content => {
-        if (content) {
-            const title = content.match(/<title>(.*?)<\/title>/)[1] || '';
-            continueButton.textContent = `▶️ Continue with ${title}`;
-            continueButton.style.display = 'inline';
-            continueButton.addEventListener('click', async () => {
-                toggleLoader(true, `Loading ${title}...`);
-                await loadTextFromCache('current.json').then(json => {
-                    if (json) {
-                        const messages = JSON.parse(json);
-                        const unique = {};
-                        messages.forEach(async message => {
-                            if (unique[message.content]) return;
-                            unique[message.content] = true;
-                            const file = message.file ? await loadFileFromCache(message.file) : null;
-                            addMessage(message.content, message.role === 'user', file && createDownloadButton(file));
-                        });
-                    }
-                });
-                previewHTML(content);
-                toggleLoader(false);
-                toggleWorkspace();
-            });
-        }
-    });
+    listProjects();
 }
 
+// Event listeners
 aiPrompt.addEventListener('input', autoSizeTextarea);
 messageInput.addEventListener('input', autoSizeTextarea);
 
-// Event listener to toggle panel
 togglePanel.addEventListener('click', () => {
     sidePanel.classList.toggle('collapsed');
 });
 
-// Event listener to send message
+backButton.addEventListener('click', () => {
+    toggleWorkspace(false);
+});
+
+shareButton.addEventListener('click', async () => {
+    if (!currentProject.shared) {
+        const response = await fetch('/api', {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            method: 'POST',
+            body: JSON.stringify({
+                project: currentProject
+            })
+        });
+        const etag = response.headers.get('etag');
+        currentProject.shared = `/shared/${etag}`;
+        saveProject(currentProject);
+        shareButton.innerText = '✅';
+    } else {
+        const win = window.open(currentProject.shared, '_blank');
+        win.focus();
+    }
+});
+
 sendButton.addEventListener('click', () => sendMessage(true));
 
-// Event listener to send message on enter key press
 messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage(true);
-    }
-});
-
-downloadContent.addEventListener('click', () => {
-    const blob = new Blob([currentHTML], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = getFileName(currentTitle);
-    a.click();
-    a.onclick = () => {
-        setTimeout(() => {
-            URL.revokeObjectURL(url);
-        }, 1000);
     }
 });
 
@@ -568,7 +582,8 @@ audioButton.addEventListener('click', () => {
                 const audioElement = document.createElement('audio');
                 audioElement.controls = true;
                 audioElement.src = URL.createObjectURL(audioFile);
-                addMessage(`Audio recorded: recorded_audio.wav (${audioFile.size} bytes)`, true, audioElement, createDownloadButton(audioFile));
+                currentProject.messages.push(addMessage(`Audio recorded: recorded_audio.wav (${audioFile.size} bytes)`, true, audioElement, createDownloadButton(audioFile)));
+                saveProject(currentProject);
             });
 
             mediaRecorder.addEventListener("dataavailable", event => {
@@ -588,65 +603,58 @@ audioButton.addEventListener('click', () => {
 generateContent.addEventListener('click', async () => {
     const prompt = aiPrompt.value.trim();
     if (prompt) {
-        currentInstructions = prompt;
-        if (usePlanner.checked) {
-            await generatePlan(prompt);
-        } else {
-            toggleWorkspace();
-            addMessage(prompt, true);
-            aiPrompt.value = '';
-            const content = await executePrompt('Making something cool...', [{ role: 'user', content: prompt }]);
-            const message = content.split('<')[0].trim();
-            if (message) {
-                addMessage(message);
-            }
-            const html = getHtml(content);
-            if (html) {
-                previewHTML(html);
-            }
+        if (!currentProject.id) {
+            currentProject = await createNewProject(prompt);
         }
+        currentProject.instructions = prompt;
+        toggleWorkspace(true);
+        currentProject.messages.push(addMessage(prompt, true));
+        aiPrompt.value = '';
+        const content = await executePrompt('Making something cool...', [{ role: 'user', content: prompt }]);
+        const message = content.split('<')[0].trim();
+        if (message) {
+            currentProject.messages.push(addMessage(message));
+        }
+        const html = getHtml(content);
+        if (html) {
+            previewHTML(html);
+            currentProject.html = html;
+        }
+        saveProject(currentProject);
     }
 });
 
-// Event listener to improve content
+downloadContent.addEventListener('click', () => {
+    if (currentProject.html) {
+        const blob = new Blob([currentProject.html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = getFileName(currentProject.title);
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+});
+
 improveContent.addEventListener('click', async () => {
-    const improve = `improvements, bug fixes, and/or additional features...`;
-    if (usePlanner.checked) {
-        generatePlan(`${currentTitle} - ${improve}\n\n## Current HTML:\n${currentHTML}`);
-    } else {
+    if (currentProject.html) {
+        const improve = `improvements, bug fixes, and/or additional features...`;
+        currentProject.messages.push(addMessage(improve, true));
         const content = await executePrompt('Improving Content...', [
-            { role: 'user', content: currentTitle },
-            { role: 'assistant', content: currentHTML },
+            { role: 'user', content: currentProject.title },
+            { role: 'assistant', content: currentProject.html },
             { role: 'user', content: improve },
         ]);
         const message = content.split('<')[0].trim();
         if (message) {
-            addMessage(improve, true);
-            addMessage(message);
+            currentProject.messages.push(addMessage(message));
         }
         const html = getHtml(content);
         if (html) {
             previewHTML(html);
         }
+        saveProject(currentProject);
     }
-});
-
-// Event listener for emoji button
-emojiButton.addEventListener('click', () => {
-    emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'block' : 'none';
-});
-
-// Load emoji buttons
-const emojis = ['😊', '😂', '❤️', '👍', '🎉', '🌟', '🤔', '😎'];
-emojis.forEach(emoji => {
-    const button = document.createElement('span');
-    button.textContent = emoji;
-    button.classList.add('emoji-button');
-    button.addEventListener('click', () => {
-        messageInput.value += emoji;
-        emojiPicker.style.display = 'none';
-    });
-    emojiPicker.appendChild(button);
 });
 
 // Initialize the application
