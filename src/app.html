@@ -3,63 +3,54 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>YouSayAIDo.com</title>
-    <link rel="stylesheet" href="nes.min.css">
     <link rel="stylesheet" href="app.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.51.0/min/vs/loader.min.js"></script>
 </head>
 
 <body>
-    <div id="startContent" class="nes-container with-title is-centered">
-        <p class="title">YouSayAIDo.com</p>
-        <textarea id="aiPrompt" class="nes-textarea"
-            placeholder="Type an idea for any webpage, app, or game..."></textarea>
-        <button id="generateContent" class="nes-btn is-primary">🤯 Create</button>
-        <div style="flex-grow:1;">
-            <hr />
-        </div>
-        <div id="projectList" class="project-list"></div>
+    <div class="toolbar">
+        <button id="menuButton">≡</button>
+        <h2 class="title" style="flex-grow:1">YouSayAIDo.com</h2>
+        <h2 id="projectTitle" class="title" style="flex-grow:1">YouSayAIDo.com</h2>
+        <button id="previewButton" title="Preview" style="display: none;">
+            <span>▶️</span>
+        </button>
+        <button id="downloadContent" title="Download" style="display: none;">
+            <span>⬇️</span>
+        </button>
+        <button id="shareButton" title="Share Link">
+            <span>🔗</span>
+        </button>
     </div>
-    <div id="mainContent" class="main-content" style="display: none;">
-        <div class="toolbar">
-            <div id="errorMessage" class="nes-error" style="display: none;"></div>
-            <button id="backButton" class="nes-btn" title="Go Back">
-                <span>⏪</span>
-            </button>
-            <h2 id="projectTitle" class="title" style="flex-grow:1">YouSayAIDo.com</h2>
-            <button id="shareButton" class="nes-btn" title="Share Link">
-                <span>🔗</span>
-            </button>
-            </button>
-        </div>
+    <div id="errorMessage" class="container is-error" style="display: none;"></div>
+    <div class="main-content">
+        <div id="sidePanelContent" class="side-panel message-list"></div>
         <div id="dynamicContent"></div>
-        <div class="input-container">
-            <div id="audioVisualizer" class="audio-visualizer"></div>
-            <div id="filePreview" class="file-preview"></div>
-            <textarea id="messageInput" class="message-input nes-textarea"
-                placeholder="Type, Talk, or Add Files to make changes..."></textarea>
-            <div class="control-buttons">
-                <input type="file" id="attachButton" style="display: none;">
-                <label for="attachButton" title="Attach files" class="nes-btn">📎</label>
-                <button id="audioButton" title="Talk about it" class="nes-btn">🎙️</button>
-                <div class="spacer"></div>
-                <button id="improveContent" class="nes-btn">🔮<span> Improve</span></button>
-                <button id="downloadContent" class="nes-btn">⏬<span> Download</span></button>
-                <div class="spacer"></div>
-                <button id="sendButton" class="send-button nes-btn is-primary">🪄 Update</button>
-            </div>
-        </div>
-        <div id="loaderContainer" class="loading-dialog nes-container" style="display: none;">
-            <div class="loading-bar"></div>
-            <div class="loader"></div>
+        <div id="editorContent"></div>
+        <button id="closeButton" title="Edit" style="display: none;">
+            <span>➡️</span>
+        </button>
+    </div>
+    <div class="input-container">
+        <div id="audioVisualizer" class="audio-visualizer"></div>
+        <div id="filePreview" class="file-preview"></div>
+        <textarea id="messageInput" class="message-input"
+            placeholder="Type, Talk, or Add Files to make changes..."></textarea>
+        <div class="control-buttons">
+            <input type="file" id="attachButton" style="display: none;">
+            <label for="attachButton" title="Attach files">📎 Attach</label>
+            <div class="spacer"></div>
+            <button id="audioButton" title="Talk about it">🎙️ Speak</button>
+            <div class="spacer"></div>
+            <button id="sendButton" class="send-button is-primary">🪄 Update</button>
         </div>
     </div>
-    <div id="sidePanel" class="side-panel" style="display: none;">
-        <div class="toolbar">
-            <h2 class="title" style="flex-grow:1">YouSayAIDo.com</h2>
-            <button id="toggleConversation" class="nes-btn">≡</button>
-        </div>
-        <div id="chatMessages" class="chat-messages"></div>
+    <div id="projectList" class="project-list"></div>
+    <div id="loaderContainer" class="loading-dialog container" style="display: none;">
+        <div class="loading-bar"></div>
+        <div class="loader"></div>
     </div>
     <script src="app.js"></script>
 </body>

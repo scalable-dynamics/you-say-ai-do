@@ -8,20 +8,22 @@ const envParams = {
     get: (key) => config[key]
 };
 const hostingParams = {
-    put: async (title, readableStream, data) => {
-        const httpEtag = new Date().getTime().toString();
+    put: async (httpEtag, data) => {
         console.log('PUT: ' + httpEtag);
         hosted_files[httpEtag] = {
-            Body: readableStream,
-            Metadata: data
+            Body: data,
+            Metadata: {
+                'Content-Type': 'application/json',
+                'Content-Length': data.length
+            }
         };
-        return { httpEtag };
     },
     get: async (httpEtag) => {
         console.log('GET: ' + httpEtag);
         if (hosted_files[httpEtag]) {
             return {
                 body: hosted_files[httpEtag].Body,
+                size: hosted_files[httpEtag].Metadata['Content-Length'],
                 writeHttpMetadata(headers) {
                     headers['Content-Type'] = hosted_files[httpEtag].Metadata['Content-Type'];
                     headers['Content-Length'] = hosted_files[httpEtag].Metadata['Content-Length'];
@@ -33,12 +35,29 @@ const hostingParams = {
     },
     head: async (httpEtag) => {
         console.log('HEAD: ' + httpEtag);
-        return hosted_files.hasOwnProperty(httpEtag);
+        if (hosted_files[httpEtag]) {
+            return {
+                httpEtag,
+                writeHttpMetadata(headers) {
+                    headers['Content-Type'] = hosted_files[httpEtag].Metadata['Content-Type'];
+                    headers['Content-Length'] = hosted_files[httpEtag].Metadata['Content-Length'];
+                }
+            }
+        } else {
+            console.log('etag_not_found:', hosted_files);
+        }
     }
 };
 const server = http.createServer(async (req, res) => {
     const apiRequest = {
         method: req.method,
+        text(){
+            return new Promise((resolve, reject) => {
+                let body = '';
+                req.on('data', (chunk) => body += chunk);
+                req.on('end', () => resolve(body));
+            });
+        },
         json() {
             return new Promise((resolve, reject) => {
                 let body = '';
@@ -79,15 +98,13 @@ const server = http.createServer(async (req, res) => {
         const indexPath = path.join(__dirname, 'src', 'app.js');
         await readFile(indexPath, 'text/javascript');
     } else if (req.url.startsWith('/shared/')) {
-        const response = await hosting({ ...req, url: req.url.slice(8) }, hostingParams);
+        const response = await hosting({ headers: req.headers, method: req.method, url: req.url.slice(8) }, hostingParams);
         if (response.status !== 200) {
             res.writeHead(response.status, { 'Content-Type': 'text/plain' });
             res.end(response.body);
             return;
         }
-        for (let key in response.headers) {
-            res.setHeader(key, response.headers[key]);
-        }
+        res.writeHead(response.status, { 'Content-Type': 'text/html' });
         res.end(response.body);
     } else if (req.url === '/api') {
         const response = await connector(apiRequest, envParams, hostingParams);

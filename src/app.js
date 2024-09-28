@@ -1,9 +1,10 @@
 // Define the necessary elements
-const togglePanel = document.getElementById('toggleConversation');
+const menuButton = document.getElementById('menuButton');
 const shareButton = document.getElementById('shareButton');
-const backButton = document.getElementById('backButton');
+const closeButton = document.getElementById('closeButton');
+const previewButton = document.getElementById('previewButton');
 const projectTitle = document.getElementById('projectTitle');
-const chatMessages = document.getElementById('chatMessages');
+const sidePanelContent = document.getElementById('sidePanelContent');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
 const attachButton = document.getElementById('attachButton');
@@ -11,15 +12,10 @@ const audioButton = document.getElementById('audioButton');
 const filePreview = document.getElementById('filePreview');
 const audioVisualizer = document.getElementById('audioVisualizer');
 const dynamicContent = document.getElementById('dynamicContent');
+const editorContent = document.getElementById('editorContent');
 const errorMessage = document.getElementById('errorMessage');
-const aiPrompt = document.getElementById('aiPrompt');
-const generateContent = document.getElementById('generateContent');
 const loaderContainer = document.getElementById('loaderContainer');
-const startContent = document.getElementById('startContent');
-const sidePanel = document.getElementById('sidePanel');
-const mainContent = document.getElementById('mainContent');
 const downloadContent = document.getElementById('downloadContent');
-const improveContent = document.getElementById('improveContent');
 const projectList = document.getElementById('projectList');
 
 let isRecording = false;
@@ -29,9 +25,66 @@ let audioChunks = [];
 let speechRecognition;
 let selectedFiles = [];
 let loaderCount = 0;
+let codeEditor;
+let currentProject;
+let projectIsRunning;
 
-// Project management
-let currentProject = { messages: [] };
+async function monacoEditor(element, onChange) {
+    return new Promise((resolve, reject) => {
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.51.0/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+
+            monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+                noSemanticValidation: true,
+                noSyntaxValidation: false,
+            });
+
+            monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+                target: monaco.languages.typescript.ScriptTarget.ESNext,
+                allowNonTsExtensions: true,
+            });
+
+            const editor = monaco.editor.create(element, {
+                value: '',
+                language: 'javascript',
+                theme: 'vs-dark',
+            });
+
+            window.addEventListener('resize', () => editor.layout());
+
+            editor.onDidChangeModelContent(e => {
+                onChange(editor.getValue());
+            });
+
+            let models = {};
+            resolve({
+                clear() {
+                    for (const name in models) {
+                        models[name].dispose();
+                    }
+                    models = {};
+                },
+                addFile(name, code) {
+                    models[name] = monaco.editor.createModel(code, "application/javascript", monaco.Uri.parse(`file:///src/${name}`));
+                    models[name].setLanguage('javascript');
+                },
+                setPosition(position) {
+                    editor.setPosition(position);
+                    editor.revealPositionInCenter(position);
+                },
+                openFile(name) {
+                    editor.setModel(models[name]);
+                },
+                getValue() {
+                    return editor.getValue();
+                },
+                setValue(name, value) {
+                    models[name].setValue(value);
+                },
+            });
+        });
+    });
+}
 
 async function getProjects() {
     const file = await loadFileFromCache('projects.json');
@@ -45,6 +98,11 @@ async function getProjects() {
     }
 }
 
+async function findProject(title) {
+    const projects = await getProjects();
+    return projects.find(p => p.title === title);
+}
+
 async function saveProject(project) {
     const projects = await getProjects();
     const index = projects.findIndex(p => p.id === project.id);
@@ -53,15 +111,19 @@ async function saveProject(project) {
     } else {
         projects.push(project);
     }
+    project.savedOn = getFormattedTime();
     await saveToCache(new File([JSON.stringify(projects)], 'projects.json', { type: 'application/json' }));
 }
 
-async function createNewProject(title) {
+async function createNewProject(instructions) {
     const id = Date.now().toString();
     const newProject = {
         id,
-        title,
+        title: instructions.split('\n')[0].slice(0, 50),
+        description: '',
+        instructions,
         html: '',
+        components: [],
         messages: [],
         createdOn: getFormattedTime(),
         savedOn: getFormattedTime()
@@ -71,27 +133,109 @@ async function createNewProject(title) {
 }
 
 async function openProject(id) {
+    let codeEditorPromise;
+    if (!codeEditor) {
+        codeEditorPromise = monacoEditor(editorContent, (value, path) => {
+            for (const message of currentProject.messages) {
+                if (message.fileName === path) {
+                    message.code = value;
+                    stopProject();
+                    break;
+                }
+            }
+        }).then(editor => codeEditor = editor);
+    }
     const projects = await getProjects();
     const project = projects.find(p => p.id === id);
     if (project) {
         currentProject = project;
         updateUIForProject(project);
+
+        if (codeEditorPromise) await codeEditorPromise;
+
+        codeEditor.clear();
+        for (const component of project.components) {
+            codeEditor.addFile(component.fileName, component.code);
+            addMessage(component.title, false, createButton(component.fileName, () => {
+                if (editorContent.classList.contains('open') && codeEditor.selectedFileName === component.fileName) {
+                    togglePreview(true);
+                } else {
+                    codeEditor.openFile(component.fileName, component.code);
+                    codeEditor.selectedFileName = component.fileName;
+                    togglePreview(false);
+                }
+            }));
+        }
     } else {
         console.error('Project not found:', id);
-        alert('Project not found!');
+        alert('Project not found!\n' + id + '\n' + projects.map(p => p.id).join('\n'));
     }
 }
 
 function updateUIForProject(project) {
-    toggleWorkspace(true);
-    chatMessages.innerHTML = '';
+    projectTitle.innerText = project.title;
+    projectTitle.title = project.title + (project.description ? '\n' + removeMarkdown(project.description) : '');
+    sidePanelContent.innerHTML = '';
     for (const message of project.messages) {
-        addMessage(message.content, message.role === 'user');
+        if (message.file) {
+            addMessage(message.content, message.role === 'user', createButton(message.file, async () => {
+                const file = await loadFileFromCache(message.file);
+                if (file) {
+                    previewFile(file);
+                }
+            }));
+        } else {
+            addMessage(message.content, message.role === 'user');
+        }
+    }
+    for (const component of project.components) {
+        addMessage(component.title, false, createButton(component.fileName, () => {
+            if (editorContent.classList.contains('open') && codeEditor.selectedFileName === component.fileName) {
+                togglePreview(true);
+            } else {
+                codeEditor.openFile(component.fileName, component.code);
+                codeEditor.selectedFileName = component.fileName;
+                togglePreview(false);
+            }
+        }));
     }
     if (project.html) {
         previewHTML(project.html);
     }
-    aiPrompt.value = project.instructions || '';
+    toggleWorkspace(true);
+}
+
+function removeMarkdown(text) {
+    text = text.replace(/`/g, '');
+    text = text.replace(/\*\*/g, '');
+    text = text.replace(/_/g, '');
+    text = text.replace(/#/g, '');
+    text = text.replace(/\//g, '');
+    return text;
+}
+
+function removeLines(text) {
+    return text.replace(/\n/g, ' ');
+}
+
+function removeQuotes(text) {
+    return text.replace(/"/g, '');
+}
+
+function previewFile(file) {
+    const modal = document.createElement('div');
+    modal.classList.add('modal');
+    modal.onclick = () => modal.remove();
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(file);
+    img.classList.add('modal-content');
+    modal.appendChild(img);
+    document.body.appendChild(modal);
+}
+
+async function loadProject(id) {
+    await openProject(id);
+    await runProject(currentProject);
 }
 
 async function listProjects() {
@@ -100,7 +244,7 @@ async function listProjects() {
     for (const project of projects) {
         const item = document.createElement('div');
         item.classList.add('project-item');
-        const button = createButton(project.title, () => openProject(project.id));
+        const button = createButton(project.title, () => loadProject(project.id));
         item.appendChild(button);
         const remove = createButton('X', async () => {
             if (confirm('Are you sure you want to delete this project?')) {
@@ -187,14 +331,15 @@ function addMessage(content, isSent, ...children) {
     const message = { role: isSent ? 'user' : 'assistant', content };
     const messageElement = document.createElement('div');
     messageElement.title = content;
-    messageElement.classList.add('message', isSent ? 'sent' : 'received');
-    messageElement.innerHTML = `<p>${content.replace(/\n/g, '<br>')}</p>`;
-    chatMessages.appendChild(messageElement);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    const modifier = isSent ? 'left' : 'right';
+    messageElement.classList.add('message', modifier);
+    messageElement.innerHTML = `<div class="balloon is-dark from-${modifier}"><p>${content.replace(/\n/g, '<br>')}</p></div>`;
+    sidePanelContent.appendChild(messageElement);
+    sidePanelContent.scrollTop = sidePanelContent.scrollHeight;
     if (children && children.length > 0) {
         for (const child of children) {
             if (!child) continue;
-            messageElement.appendChild(child);
+            messageElement.firstElementChild.appendChild(child);
             if (child.dataset.file) {
                 message.file = child.dataset.file;
             }
@@ -214,6 +359,94 @@ function previewFile(file) {
     return () => win.close();
 }
 
+function parseCodeOutput(outputText) {
+    const files = [];
+    const codeBlockRegex = /```(.*?)\n([\s\S]*?)```/gm;
+    let match;
+
+    while ((match = codeBlockRegex.exec(outputText)) !== null) {
+        const language = match[1].trim();
+        const content = match[2].trim();
+        if(!content) continue;
+        const filenameMatch = content.match(/^(?:\/\/|<!--|#)\s*File\s*:\s*(.*)$/m);
+        const filename = filenameMatch ? filenameMatch[1].trim() : 'unknown.txt';
+
+        files.push({
+            filename: filename,
+            language: language,
+            content: content,
+        });
+    }
+
+    return files;
+}
+
+function findComponentByFileName(fileName) {
+    return currentProject.components.find(c => c.fileName === fileName);
+}
+
+async function updateContent(prompt, context = []) {
+    if (!currentProject) {
+        currentProject = await createNewProject(prompt);
+        toggleWorkspace(true);
+    }
+    let fileName, code, instructions, isComponent;
+    if (editorContent.classList.contains('open')) {
+        instructions = `Component ${codeEditor.selectedFileName} for ${currentProject.title}`;
+        code = codeEditor.getValue();
+        fileName = codeEditor.selectedFileName;
+        isComponent = true;
+    } else {
+        instructions = `Project ${currentProject.title}\n${currentProject.instructions}`;
+        code = getProjectHtml(currentProject);
+        fileName = getFileName(currentProject.title);
+    }
+    if (!code || !fileName) return;
+    currentProject.messages.push(addMessage(prompt, true));
+    const content = await executePrompt('Improving Content...', prompt, [
+        ...context.map(c => `Additional Context: ${c}`),
+        `Project: ${currentProject.title}`,
+        `Focus Area: ${instructions}`,
+        `Code: ${code}`,
+    ]);
+    if (isComponent) {
+        for (const component of currentProject.components) {
+            if (component.fileName === fileName) {
+                component.code = content;
+                break;
+            }
+        }
+        codeEditor.setValue(fileName, content);
+    } else {
+        const files = parseCodeOutput(content);
+        if (files.length === 0) {
+            currentProject.html = content;
+        } else {
+            files.forEach(file => {
+                const component = findComponentByFileName(file.filename);
+                if (component) {
+                    component.code = file.content;
+                } else {
+                    currentProject.components.push({
+                        fileName: file.filename,
+                        title: file.filename,
+                        code: file.content,
+                    });
+                }
+            });
+        }
+        updateUIForProject(currentProject);
+        saveProject(currentProject);
+        runProject(currentProject);
+    }
+    if (currentProject.shared) {
+        if (!currentProject.history) currentProject.history = [];
+        currentProject.history.push(currentProject.shared);
+        currentProject.shared = undefined;
+    }
+    await saveProject(currentProject);
+}
+
 // Function to send a message
 async function sendMessage(user = false) {
     const loadImages = [];
@@ -221,7 +454,7 @@ async function sendMessage(user = false) {
         for (const file of selectedFiles) {
             const fileText = `File attached: ${file.name} (${file.size} bytes)`;
             const downloadButton = createDownloadButton(file);
-            saveProject(currentProject);
+            currentProject.messages.push(addMessage(fileText, true, downloadButton));
             if (file.type.indexOf('image') === 0) {
                 const reader = new FileReader();
                 loadImages.push(new Promise((resolve) => {
@@ -237,34 +470,17 @@ async function sendMessage(user = false) {
         selectedFiles = [];
     }
     let value = messageInput.value.trim();
+    const context = [];
     if (loadImages.length > 0) {
-        if (value) value += '\n---\n';
-        value += 'Use this for inspiration:\n';
         const images = await Promise.all(loadImages);
-        const description = await executePrompt('Analyzing Images...', currentProject.messages, images);
-        value += description;
+        const description = await executePrompt('Analyzing Images...', value, [], images);
+        context.push(description);
     }
     if (value) {
         messageInput.value = '';
-        const content = await executePrompt('Generating Content...', [
-            ...currentProject.messages,
-            { role: 'user', content: currentProject.instructions },
-            { role: 'assistant', content: currentProject.html },
-            { role: 'user', content: value }
-        ]);
-        if (user) {
-            currentProject.messages.push(addMessage(value, true));
-        }
-        const message = content.split('<')[0].trim();
-        if (message) {
-            currentProject.messages.push(addMessage(message));
-        }
-        const html = getHtml(content);
-        if (html) {
-            previewHTML(html);
-        }
+        messageInput.style.height = 'auto';
+        await updateContent(value, context);
     }
-    saveProject(currentProject);
 }
 
 // Function to visualize audio input
@@ -290,22 +506,21 @@ function visualizeAudio(stream) {
 }
 
 // Function to get HTML content from text
-function getHtml(text) {
+function getHtml(text, currentHtml = '') {
     const html = getHtmlTag(text, '!DOCTYPE html', 'html');
     if (html) return html;
     const body = getHtmlTag(text, 'script') + getHtmlTag(text, 'style') + getHtmlTag(text, 'div');
-    if (body && currentProject.html) return currentProject.html.replace('</body>', body + '</body>');
+    if (body && currentHtml) return currentHtml.replace('</body>', body + '</body>');
     return '';
 }
 
 function removeContinuation(text) {
-    if (text && text.includes('Certainly!')) {
+    if (text && text.includes('Certainly')) {
         const lines = text.split('\n');
-        const index = lines.findIndex(line => line.includes('Certainly!'));
+        const index = lines.findIndex(line => line.includes('Certainly'));
         if (index > -1) {
             lines.splice(index, 1);
             text = lines.join('\n');
-            console.log('Removed line with Certainly!');
         }
     }
     return text;
@@ -320,55 +535,61 @@ function getHtmlTag(text, startTag, endTag) {
     return text.slice(start, end);
 }
 
-// Function to preview HTML content
-function previewHTML(htmlContent) {
-    dynamicContent.innerHTML = '';
-    errorMessage.style.display = 'none';
-    const iframe = document.createElement('iframe');
-    iframe.style.width = '100%';
-    iframe.style.height = '100%';
-    iframe.style.border = 'none';
-    dynamicContent.appendChild(iframe);
-    const iframeDoc = iframe.contentWindow.document;
-    iframeDoc.open();
-    iframeDoc.onerror = (e) => {
-        const error = (e && e.message) || e?.toString() || 'An error occurred while rendering the content.';
-        errorMessage.textContent = error;
-        const button = document.createElement('button');
-        button.textContent = '🛠️ Fix it';
-        button.classList.add('btn', 'is-error');
-        button.onclick = () => {
-            messageInput.value = error;
-            errorMessage.style.display = 'none';
-            sendMessage();
-        };
-        errorMessage.appendChild(button);
-        errorMessage.style.display = 'block';
-    };
-    iframeDoc.write(htmlContent);
-    iframeDoc.close();
-    currentProject.html = htmlContent;
-    currentProject.title = getHtmlTitle(htmlContent) || currentProject.title;
-    projectTitle.innerText = trimText(currentProject.title);
-    saveProject(currentProject);
-    if (currentProject.shared) {
-        fetch(currentProject.shared, {
-            method: 'HEAD'
-        }).then(response => {
-            if (response.status === 200) {
-                shareButton.innerText = '✅';
-            } else {
-                shareButton.innerText = '🔗';
-                currentProject.shared = undefined;
-            }
-        });
-    } else {
-        shareButton.innerText = '🔗';
+function injectScriptTag(html, script) {
+    const index = html.indexOf('<body');
+    if (index !== -1) {
+        html = html.slice(0, index) + "<script>" + script + "</" + "script>" + html.slice(index);
     }
+    return html;
 }
 
+function handleError(e, source, lineno, colno, err) {
+    console.warn('An error occurred:', e);
+    const error = err || (e && e.message) || e?.toString() || 'An error occurred while rendering the content.';
+    errorMessage.textContent = error;
+    const link = document.createElement('a');
+    link.textContent = `🔍 Locate Error`;
+    link.href = 'javascript:void(0)';
+    errorMessage.appendChild(link);
+    link.onclick = () => {
+        if (lineno > -1) {
+            const html = getProjectHtml(currentProject);
+            const lineNumber = lineno - 1;
+            const lines = html.split('\n');
+            let currentLine = 0;
+            for (const component of currentProject.components) {
+                currentLine += component.code.split('\n').length;
+                if (currentLine > lineNumber) {
+                    const index = lineNumber - (currentLine - component.code.split('\n').length);
+                    const errorLine = component.code.split('\n')[index];
+                    const errorIndex = lines.findIndex(line => line.includes(errorLine));
+                    if (errorIndex !== -1) {
+                        codeEditor.openFile(component.fileName);
+                        codeEditor.setPosition({ lineNumber: errorIndex + 1, column: errorLine.indexOf(')') + 1 });
+                        togglePreview(false);
+                        break;
+                    }
+                }
+            }
+        } else {
+            codeEditor.openFile(currentProject.components[0].fileName);
+            togglePreview(false);
+        }
+    };
+    const button = document.createElement('button');
+    button.textContent = '🛠️ Fix it';
+    button.classList.add('btn', 'is-error');
+    button.onclick = () => {
+        messageInput.value = error;
+        errorMessage.style.display = 'none';
+        sendMessage();
+    };
+    errorMessage.appendChild(button);
+    errorMessage.style.display = 'block';
+};
+
 // Function to execute a prompt
-async function executePrompt(description, messages, images) {
+async function executePrompt(description, prompt, messages, images) {
     toggleLoader(description);
     let content = '';
     try {
@@ -378,6 +599,7 @@ async function executePrompt(description, messages, images) {
             },
             method: 'POST',
             body: JSON.stringify({
+                prompt,
                 messages,
                 images
             })
@@ -408,12 +630,14 @@ function toggleLoader(show = true, text) {
 
 // Function to toggle workspace display
 function toggleWorkspace(show = true) {
-    startContent.style.display = show ? 'none' : 'flex';
-    sidePanel.style.display = show ? 'flex' : 'none';
-    mainContent.style.display = show ? 'flex' : 'none';
-    if (document.body.clientWidth < 768) {
-        sidePanel.classList.add('collapsed');
-    }
+    projectList.style.display = show ? 'none' : 'block';
+    document.body.classList.toggle('workspace', show);
+    toggleSidePanel(show && document.body.clientWidth > 768);
+}
+
+function toggleSidePanel(show = true) {
+    sidePanelContent.style.display = show ? 'flex' : 'none';
+    sidePanelContent.classList.toggle('collapsed', !show);
 }
 
 // Cache management functions
@@ -447,22 +671,173 @@ async function loadFileFromCache(fileName) {
     return null;
 }
 
+function togglePreview(isPreviewVisible) {
+    closeButton.style.display = isPreviewVisible ? 'none' : 'block';
+    editorContent.classList.toggle('open', !isPreviewVisible);
+}
+
+function getProjectHtml(project) {
+    if (project.html) return project.html;
+
+    const elements = { main: 'div' };
+    const styles = [];
+    const scripts = [];
+
+    console.log('Running project:', project.components);
+
+    project.components.forEach(c => {
+        if (c.type === 'css') {
+            styles.push(c.code);
+        } else if (c.type === 'javascript') {
+            scripts.push(c.code);
+        } else {
+            const lines = c.code.split('\n');
+            lines.forEach((line, i) => {
+                if (line.includes('document.getElementById')) {
+                    const next = lines[i + 1];
+                    let id = (line.split('(')[1] || '').split(')')[0];
+                    if (id[0] === "'") {
+                        id = id.slice(1, -1);
+                        elements[id] = next && next.includes('getContext') ? 'canvas' : 'div';
+                    }
+                }
+            });
+        }
+    });
+
+    const description = project.description ? removeMarkdown(removeLines(removeQuotes(project.description))) : project.title;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="YouSayAIDo.com">
+    <title>${project.title}</title>
+    <meta name="description" content="${description}">
+    <style>
+        ${styles.join('\n')}
+    </style>
+</head>
+<body>
+    ${Object.keys(elements).map(id => `<${elements[id]} id="${id}"></${elements[id]}>`).join('\n    ')}
+    <script>
+        ${scripts.join('\n\n')}
+    </script>
+</body>
+</html>`;
+}
+
+function previewHTML(htmlContent, showPreview = true) {
+    console.log('Previewing HTML:', htmlContent);
+    dynamicContent.innerHTML = '';
+    errorMessage.style.display = 'none';
+    const iframe = document.createElement('iframe');
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    dynamicContent.appendChild(iframe);
+    if (showPreview) togglePreview(true);
+    toggleLoader('Loading Preview...');
+
+    const iframeDoc = iframe.contentWindow.document;
+    iframeDoc.open();
+
+    const injectedScript = `
+        window.onerror = (message, source, lineno, colno, error) => {
+            console.error('An error occurred:', message, source, lineno, colno, error);
+            parent.postMessage({ type: 'error', message }, '*');
+            return true;
+        };
+        document.addEventListener('DOMContentLoaded', () => {
+            const height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+            parent.postMessage({ type: 'loaded', title: document.title, height }, '*');
+        });
+    `;
+
+    const injectedStyle = `
+        <style>
+            html, body { 
+                margin: 0; 
+                min-height: 100vh; 
+            }
+            canvas { 
+                width: 100%; 
+                min-height: calc(100vh - 20px);
+            }
+        </style>
+    `;
+
+    iframeDoc.write(injectScriptTag(htmlContent, injectedScript) + injectedStyle);
+    iframeDoc.close();
+
+    window.addEventListener('message', (e) => {
+        console.log('Message received:', e.data);
+        if (e.data.type === 'loaded') {
+            toggleLoader(false);
+            const title = trimText(e.data.title);
+            const height = e.data.height;
+            iframe.style.height = height + 'px';
+            dynamicContent.style.height = height + 'px';
+            projectTitle.innerText = title;
+            projectTitle.title = title;
+        } else if (e.data.type === 'resume') {
+            runProject(currentProject);
+        } else if (e.data.type === 'error') {
+            handleError(e.data.message);
+        }
+    });
+}
+
+async function runProject(project) {
+    togglePreview(true);
+    previewHTML(getProjectHtml(project));
+    projectIsRunning = true;
+    previewButton.innerText = '⏹️';
+}
+
+function stopProject() {
+    previewHTML(`<!DOCTYPE html><html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="YouSayAIDo.com">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; }
+        button { font-size: 2rem; padding: 1rem 2rem; background-color: #108de0; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <button onclick="parent.postMessage({ type: 'resume' });">Resume</button>
+</body></html>`, false);
+    projectIsRunning = false;
+    previewButton.innerText = '▶️';
+}
+
 // Initialize event listeners and functions
 function init() {
-    aiPrompt.focus();
     listProjects();
 }
 
 // Event listeners
-aiPrompt.addEventListener('input', autoSizeTextarea);
 messageInput.addEventListener('input', autoSizeTextarea);
 
-togglePanel.addEventListener('click', () => {
-    sidePanel.classList.toggle('collapsed');
+menuButton.addEventListener('click', toggleSidePanel);
+
+closeButton.addEventListener('click', () => {
+    if (editorContent.classList.contains('open')) {
+        togglePreview(true);
+    } else {
+        togglePreview(false);
+    }
 });
 
-backButton.addEventListener('click', () => {
-    toggleWorkspace(false);
+previewButton.addEventListener('click', () => {
+    if (!projectIsRunning) {
+        runProject(currentProject);
+    } else {
+        stopProject();
+    }
 });
 
 shareButton.addEventListener('click', async () => {
@@ -479,14 +854,17 @@ shareButton.addEventListener('click', async () => {
         const etag = response.headers.get('etag');
         currentProject.shared = `/shared/${etag}`;
         saveProject(currentProject);
-        shareButton.innerText = '✅';
-    } else {
-        const win = window.open(currentProject.shared, '_blank');
-        win.focus();
     }
+    const win = window.open(currentProject.shared, '_blank');
+    win.focus();
 });
 
-sendButton.addEventListener('click', () => sendMessage(true));
+sendButton.addEventListener('click', () => {
+    if (!messageInput.value.trim()) {
+        messageInput.value = 'improvements, bug fixes, and/or additional features...';
+    }
+    sendMessage(true);
+});
 
 messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -495,24 +873,17 @@ messageInput.addEventListener('keydown', (e) => {
     }
 });
 
-aiPrompt.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        generateContent.click();
-    }
-});
-
-aiPrompt.addEventListener('paste', (e) => {
-    const text = e.clipboardData.getData('text');
-    if (text) {
-        const html = getHtml(text);
-        if (html) {
-            e.preventDefault();
-            toggleWorkspace();
-            previewHTML(html);
-        }
-    }
-});
+// aiPrompt.addEventListener('paste', (e) => {
+//     const text = e.clipboardData.getData('text');
+//     if (text) {
+//         const html = getHtml(text);
+//         if (html) {
+//             e.preventDefault();
+//             toggleWorkspace();
+//             previewHTML(html);
+//         }
+//     }
+// });
 
 // Event listener to handle file attachments
 attachButton.addEventListener('change', (e) => {
@@ -582,6 +953,7 @@ audioButton.addEventListener('click', () => {
                 const audioElement = document.createElement('audio');
                 audioElement.controls = true;
                 audioElement.src = URL.createObjectURL(audioFile);
+                if (!currentProject) return;
                 currentProject.messages.push(addMessage(`Audio recorded: recorded_audio.wav (${audioFile.size} bytes)`, true, audioElement, createDownloadButton(audioFile)));
                 saveProject(currentProject);
             });
@@ -599,62 +971,23 @@ audioButton.addEventListener('click', () => {
     }
 });
 
-// Event listener to generate content
-generateContent.addEventListener('click', async () => {
-    const prompt = aiPrompt.value.trim();
-    if (prompt) {
-        if (!currentProject.id) {
-            currentProject = await createNewProject(prompt);
-        }
-        currentProject.instructions = prompt;
-        toggleWorkspace(true);
-        currentProject.messages.push(addMessage(prompt, true));
-        aiPrompt.value = '';
-        const content = await executePrompt('Making something cool...', [{ role: 'user', content: prompt }]);
-        const message = content.split('<')[0].trim();
-        if (message) {
-            currentProject.messages.push(addMessage(message));
-        }
-        const html = getHtml(content);
-        if (html) {
-            previewHTML(html);
-            currentProject.html = html;
-        }
-        saveProject(currentProject);
-    }
-});
-
 downloadContent.addEventListener('click', () => {
-    if (currentProject.html) {
-        const blob = new Blob([currentProject.html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = getFileName(currentProject.title);
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    let fileName, code;
+    if (editorContent.classList.contains('open')) {
+        code = codeEditor.getValue();
+        fileName = codeEditor.selectedFileName;
+    } else {
+        code = getProjectHtml(currentProject);
+        fileName = getFileName(currentProject.title);
     }
-});
-
-improveContent.addEventListener('click', async () => {
-    if (currentProject.html) {
-        const improve = `improvements, bug fixes, and/or additional features...`;
-        currentProject.messages.push(addMessage(improve, true));
-        const content = await executePrompt('Improving Content...', [
-            { role: 'user', content: currentProject.title },
-            { role: 'assistant', content: currentProject.html },
-            { role: 'user', content: improve },
-        ]);
-        const message = content.split('<')[0].trim();
-        if (message) {
-            currentProject.messages.push(addMessage(message));
-        }
-        const html = getHtml(content);
-        if (html) {
-            previewHTML(html);
-        }
-        saveProject(currentProject);
-    }
+    if (!code || !fileName) return;
+    const blob = new Blob([code], { type: 'text/javascript' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 // Initialize the application

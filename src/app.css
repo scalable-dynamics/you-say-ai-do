@@ -5,71 +5,133 @@ body {
     margin: 0;
     padding: 0;
     display: flex;
+    flex-direction: column;
     min-height: 100vh;
 }
 
-h2.title {
-    padding-top: 5px;
+a {
+    color: #209cee;
+}
+
+a:hover {
+    color: #209cee;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    min-width: 350px;
+    background-color: #303030;
+    border: solid 2px white;
+    border-radius: 10px;
+    margin: 10px;
+}
+
+.container.with-title {
+    padding-top: 40px;
+}
+
+.container.with-title .title {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background-color: #303030;
+    padding: 10px;
+    z-index: 100;
+    border: solid 4px white;
+}
+
+.container.is-error {
+    border: dashed 4px #ff0000;
+}
+
+.container.is-error {
+    color: white !important;
+}
+
+.is-primary {
+    color: #209cee;
+}
+
+.is-error {
+    color: #ff0000;
+}
+
+.is-centered {
+    text-align: center;
 }
 
 p.title {
     color: black;
 }
 
-#startContent {
-    margin: auto;
+.balloon {
+    background-color: #303030;
+    border: solid 2px white;
+    border-radius: 10px;
+    padding: 10px;
+    margin: 10px;
+}
+
+.balloon .title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.balloon .content {
     display: flex;
     flex-direction: column;
-    width: 450px;
-    padding: 20px;
+    gap: 10px;
 }
 
-#aiPrompt {
-    width: 100%;
-    min-height: 60px;
-    max-height: 600px;
-    resize: none;
-}
 
-#generateContent {
-    margin-top: 10px;
-    margin-left: auto;
-    width: 120px;
+
+#closeButton {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 100;
 }
 
 .toolbar {
     display: flex;
     gap: 6px;
+    background-color: #303030;
     border-bottom: solid 2px white;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+#errorMessage button {
+    margin: 10px;
 }
 
 .side-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 101;
     width: 300px;
     background-color: #303030;
     border-right: 4px solid #ffffff;
     display: flex;
     flex-direction: column;
-    transition: width 0.3s ease;
-}
-
-.side-panel.collapsed {
-    width: 60px;
-    overflow: hidden;
-}
-
-.side-panel.collapsed .message>* {
-    display: none;
+    transition: width 0.2s ease;
 }
 
 h2.title {
+    padding-top: 5px;
     font-size: 1.7rem;
     font-weight: bold;
     text-align: center;
     white-space: nowrap;
-}
-
-.side-panel.collapsed h2 {
-    display: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .toggle-panel {
@@ -85,9 +147,15 @@ h2.title {
     display: flex;
     flex-direction: column;
     position: relative;
+    width: 500px;
+    margin: 10px auto;
 }
 
-.chat-messages {
+.workspace .input-container {
+    width: 100%;
+}
+
+#sidePanelContent {
     flex-grow: 1;
     overflow-x: hidden;
     overflow-y: auto;
@@ -104,13 +172,13 @@ h2.title {
     word-wrap: break-word;
 }
 
-.message.sent {
+.message.-left {
     background-color: #4a4a4a;
     align-self: flex-end;
     margin-left: auto;
 }
 
-.message.received {
+.message.-right {
     background-color: #606060;
     align-self: flex-start;
 }
@@ -123,6 +191,9 @@ h2.title {
     resize: none;
     min-height: 30px;
     width: auto;
+    border: 4px solid #209cee;
+    border-radius: 10px;
+    margin-bottom: 10px;
 }
 
 .spacer {
@@ -145,7 +216,29 @@ h2.title {
 }
 
 .control-buttons>label {
-    line-height: 100%;
+    line-height: 45px;
+    padding: 0 10px;
+}
+
+.control-buttons>button,
+.control-buttons>label {
+    margin: 5px;
+    min-width: 45px;
+    min-height: 45px;
+    white-space: nowrap;
+    background-color: #404040;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 1.2em;
+    transition: background-color 0.2s;
+}
+
+.control-buttons>button:hover,
+.control-buttons>label:hover{
+    background-color: #505050;
+
 }
 
 .file-preview,
@@ -157,25 +250,86 @@ h2.title {
     display: none;
 }
 
+.toolbar button {
+    background-color: white;
+}
+
+#menuButton {
+    display: none;
+}
+
+#menuButton {
+    position: fixed;
+    top: 0;
+    left: 0;
+}
+
 .main-content {
     flex-grow: 1;
-    display: flex;
     flex-direction: column;
-    height: 100vh;
+    width: 100%;
+    padding-left: 60px;
     position: relative;
+    display: none;
+}
+
+.workspace .main-content {
+    display: flex;
+}
+
+.main-content .toolbar::before {
+    content: '';
+    background-color: #303030;
+    border-bottom: solid 2px white;
+    position: absolute;
+    top: 0;
+    left: -60px;
+    bottom: -2px;
+    width: 60px;
+    z-index: -1;
 }
 
 #dynamicContent {
+    width: 100%;
+    height: 100%;
+    overflow: none;
+}
+
+#editorContent {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    width: 100%;
+    height: 100%;
+    max-height: calc(100vh - 40px);
+    left: 100%;
+    transition: left 0.3s ease;
+}
+
+#editorContent.open {
+    left: 0;
+}
+
+.main-content {
+    position: relative;
+    overflow: hidden;
     flex-grow: 1;
     background-color: #303030;
     border: 4px solid #ffffff;
     border-radius: 10px;
-    overflow: none;
-    margin: 20px;
+    margin: 10px;
 }
 
-.nes-btn {
+button {
     margin: 5px;
+    min-width: 45px;
+    min-height: 45px;
+    white-space: nowrap;
+}
+
+.project-list {
+    align-self: center;
+    max-width: 500px;
 }
 
 .project-item {
@@ -183,6 +337,10 @@ h2.title {
     justify-content: space-between;
     align-items: center;
     padding: 2px;
+}
+
+.project-item button {
+    min-height: 25px;
 }
 
 .project-item>*:first-child {
@@ -348,5 +506,13 @@ h2.title {
 
     .spacer {
         display: none;
+    }
+
+    .side-panel {
+        width: 100%;
+    }
+
+    #menuButton {
+        display: block;
     }
 }
