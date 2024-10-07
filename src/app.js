@@ -1,9 +1,11 @@
 // Define the necessary elements
 const menuButton = document.getElementById('menuButton');
+const editButton = document.getElementById('editButton');
 const shareButton = document.getElementById('shareButton');
-const closeButton = document.getElementById('closeButton');
 const previewButton = document.getElementById('previewButton');
 const projectTitle = document.getElementById('projectTitle');
+const sidePanel = document.getElementById('sidePanel');
+const sidePanelButtons = sidePanel.querySelector('.control-buttons');
 const sidePanelContent = document.getElementById('sidePanelContent');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
@@ -18,16 +20,16 @@ const loaderContainer = document.getElementById('loaderContainer');
 const downloadContent = document.getElementById('downloadContent');
 const projectList = document.getElementById('projectList');
 
-let isRecording = false;
-let mediaRecorder;
-let recordingSendTimer;
-let audioChunks = [];
-let speechRecognition;
 let selectedFiles = [];
 let loaderCount = 0;
 let codeEditor;
 let currentProject;
 let projectIsRunning;
+let autoSendSpeechTimer;
+
+// window.onerror = (message, source, lineno, colno, error) => {
+//     alert('An error occurred:\n' + message + '\n' + source + '\n' + lineno + '\n' + colno + '\n' + error);
+// };
 
 async function monacoEditor(element, onChange) {
     return new Promise((resolve, reject) => {
@@ -64,9 +66,9 @@ async function monacoEditor(element, onChange) {
                     }
                     models = {};
                 },
-                addFile(name, code) {
-                    models[name] = monaco.editor.createModel(code, "application/javascript", monaco.Uri.parse(`file:///src/${name}`));
-                    models[name].setLanguage('javascript');
+                addFile(name, code, language = 'javascript', mimeType = 'application/javascript') {
+                    models[name] = monaco.editor.createModel(code, mimeType, monaco.Uri.parse(`file:///src/${name}`));
+                    models[name].setLanguage(language);
                 },
                 setPosition(position) {
                     editor.setPosition(position);
@@ -74,6 +76,7 @@ async function monacoEditor(element, onChange) {
                 },
                 openFile(name) {
                     editor.setModel(models[name]);
+                    editor.layout();
                 },
                 getValue() {
                     return editor.getValue();
@@ -81,13 +84,16 @@ async function monacoEditor(element, onChange) {
                 setValue(name, value) {
                     models[name].setValue(value);
                 },
+                resize() {
+                    editor.layout();
+                }
             });
         });
     });
 }
 
 async function getProjects() {
-    const file = await loadFileFromCache('projects.json');
+    const file = await loadFileFromCache('YouSayAIDo.json');
     if (file) {
         console.log('Loaded projects from cache:', file.name);
         const text = await file.text();
@@ -112,18 +118,16 @@ async function saveProject(project) {
         projects.push(project);
     }
     project.savedOn = getFormattedTime();
-    await saveToCache(new File([JSON.stringify(projects)], 'projects.json', { type: 'application/json' }));
+    await saveToCache(new File([JSON.stringify(projects)], 'YouSayAIDo.json', { type: 'application/json' }));
 }
 
 async function createNewProject(instructions) {
     const id = Date.now().toString();
     const newProject = {
         id,
-        title: instructions.split('\n')[0].slice(0, 50),
-        description: '',
+        title: instructions.split('\n')[0].split(':')[0].split('.')[0].trim(),
         instructions,
-        html: '',
-        components: [],
+        files: [],
         messages: [],
         createdOn: getFormattedTime(),
         savedOn: getFormattedTime()
@@ -137,7 +141,7 @@ async function openProject(id) {
     if (!codeEditor) {
         codeEditorPromise = monacoEditor(editorContent, (value, path) => {
             for (const message of currentProject.messages) {
-                if (message.fileName === path) {
+                if (message.filename === path) {
                     message.code = value;
                     stopProject();
                     break;
@@ -154,15 +158,16 @@ async function openProject(id) {
         if (codeEditorPromise) await codeEditorPromise;
 
         codeEditor.clear();
-        for (const component of project.components) {
-            codeEditor.addFile(component.fileName, component.code);
-            addMessage(component.title, false, createButton(component.fileName, () => {
-                if (editorContent.classList.contains('open') && codeEditor.selectedFileName === component.fileName) {
+        for (const component of project.files) {
+            codeEditor.addFile(component.filename, component.content, component.language, component.mimeType);
+            addMessage(component.filename, false, createButton(component.filename, () => {
+                if (editorContent.classList.contains('open') && codeEditor.selectedFileName === component.filename) {
                     togglePreview(true);
                 } else {
-                    codeEditor.openFile(component.fileName, component.code);
-                    codeEditor.selectedFileName = component.fileName;
+                    codeEditor.openFile(component.filename, component.content);
+                    codeEditor.selectedFileName = component.filename;
                     togglePreview(false);
+                    toggleSidePanel(false);
                 }
             }));
         }
@@ -170,12 +175,13 @@ async function openProject(id) {
         console.error('Project not found:', id);
         alert('Project not found!\n' + id + '\n' + projects.map(p => p.id).join('\n'));
     }
+    runProject(project);
 }
 
 function updateUIForProject(project) {
     projectTitle.innerText = project.title;
     projectTitle.title = project.title + (project.description ? '\n' + removeMarkdown(project.description) : '');
-    sidePanelContent.innerHTML = '';
+    sidePanelContent.innerHTML = '<h2>Messages</h2>';
     for (const message of project.messages) {
         if (message.file) {
             addMessage(message.content, message.role === 'user', createButton(message.file, async () => {
@@ -187,20 +193,6 @@ function updateUIForProject(project) {
         } else {
             addMessage(message.content, message.role === 'user');
         }
-    }
-    for (const component of project.components) {
-        addMessage(component.title, false, createButton(component.fileName, () => {
-            if (editorContent.classList.contains('open') && codeEditor.selectedFileName === component.fileName) {
-                togglePreview(true);
-            } else {
-                codeEditor.openFile(component.fileName, component.code);
-                codeEditor.selectedFileName = component.fileName;
-                togglePreview(false);
-            }
-        }));
-    }
-    if (project.html) {
-        previewHTML(project.html);
     }
     toggleWorkspace(true);
 }
@@ -233,26 +225,29 @@ function previewFile(file) {
     document.body.appendChild(modal);
 }
 
-async function loadProject(id) {
-    await openProject(id);
-    await runProject(currentProject);
-}
-
 async function listProjects() {
-    projectList.innerHTML = '';
     const projects = await getProjects();
+    if (projects.length === 0) return;
+    projectList.innerHTML = `<h2>Projects</h2>`;
     for (const project of projects) {
         const item = document.createElement('div');
         item.classList.add('project-item');
-        const button = createButton(project.title, () => loadProject(project.id));
+        const open = async () => {
+            await openProject(project.id);
+        };
+        const button = createButton('▶️', open);
         item.appendChild(button);
-        const remove = createButton('X', async () => {
+        const title = document.createElement('h2');
+        title.textContent = project.title;
+        title.addEventListener('click', open);
+        item.appendChild(title);
+        const remove = createButton('❌', async () => {
             if (confirm('Are you sure you want to delete this project?')) {
                 const projects = await getProjects();
                 const index = projects.findIndex(p => p.id === project.id);
                 if (index !== -1) {
                     projects.splice(index, 1);
-                    await saveToCache(new File([JSON.stringify(projects)], 'projects.json', { type: 'application/json' }));
+                    await saveToCache(new File([JSON.stringify(projects)], 'YouSayAIDo.json', { type: 'application/json' }));
                     listProjects();
                 }
             }
@@ -280,11 +275,6 @@ function getFileName(title) {
     return `${title.replace(/[^a-z0-9- ]/ig, '')}-${Date.now()}.html`;
 }
 
-function getHtmlTitle(html) {
-    const match = html.match(/<title>(.*?)<\/title>/);
-    return match ? match[1] : '';
-}
-
 function autoSizeTextarea(e) {
     const textarea = e.target;
     textarea.style.height = 'auto';
@@ -299,7 +289,6 @@ function trimText(text) {
 function createButton(text, onClick) {
     const button = document.createElement('button');
     button.textContent = text;
-    button.classList.add('btn');
     button.onclick = onClick;
     return button;
 }
@@ -309,7 +298,7 @@ function createDownloadButton(file) {
     const button = document.createElement('a');
     button.dataset.file = file.name;
     button.textContent = 'Download';
-    button.classList.add('btn', 'is-primary');
+    button.classList.add('is-primary');
     button.href = URL.createObjectURL(file);
     button.download = file.name;
     button.onclick = () => {
@@ -348,96 +337,40 @@ function addMessage(content, isSent, ...children) {
     return message;
 }
 
-// Function to preview a file
-function previewFile(file) {
-    const url = URL.createObjectURL(file);
-    const win = window.open(url, '_blank');
-    win.focus();
-    win.addEventListener('load', () => {
-        URL.revokeObjectURL(url);
-    });
-    return () => win.close();
-}
-
-function parseCodeOutput(outputText) {
-    const files = [];
-    const codeBlockRegex = /```(.*?)\n([\s\S]*?)```/gm;
-    let match;
-
-    while ((match = codeBlockRegex.exec(outputText)) !== null) {
-        const language = match[1].trim();
-        const content = match[2].trim();
-        if(!content) continue;
-        const filenameMatch = content.match(/^(?:\/\/|<!--|#)\s*File\s*:\s*(.*)$/m);
-        const filename = filenameMatch ? filenameMatch[1].trim() : 'unknown.txt';
-
-        files.push({
-            filename: filename,
-            language: language,
-            content: content,
-        });
-    }
-
-    return files;
-}
-
-function findComponentByFileName(fileName) {
-    return currentProject.components.find(c => c.fileName === fileName);
-}
-
 async function updateContent(prompt, context = []) {
+    if (!prompt) return;
     if (!currentProject) {
         currentProject = await createNewProject(prompt);
         toggleWorkspace(true);
     }
     let fileName, code, instructions, isComponent;
     if (editorContent.classList.contains('open')) {
-        instructions = `Component ${codeEditor.selectedFileName} for ${currentProject.title}`;
+        instructions = `Component ${codeEditor.selectedFileName} for ${currentProject.instructions}`;
         code = codeEditor.getValue();
         fileName = codeEditor.selectedFileName;
         isComponent = true;
     } else {
-        instructions = `Project ${currentProject.title}\n${currentProject.instructions}`;
-        code = getProjectHtml(currentProject);
-        fileName = getFileName(currentProject.title);
+        instructions = currentProject.instructions;
     }
-    if (!code || !fileName) return;
     currentProject.messages.push(addMessage(prompt, true));
-    const content = await executePrompt('Improving Content...', prompt, [
-        ...context.map(c => `Additional Context: ${c}`),
-        `Project: ${currentProject.title}`,
-        `Focus Area: ${instructions}`,
-        `Code: ${code}`,
-    ]);
-    if (isComponent) {
-        for (const component of currentProject.components) {
-            if (component.fileName === fileName) {
-                component.code = content;
-                break;
-            }
+    const outputs = await executePrompt('Improving Content...', instructions, context, undefined, code && fileName ? [
+        {
+            filename: fileName,
+            extension: fileName.split('.').pop(),
+            language: fileName.split('.').pop(),
+            content: code
         }
-        codeEditor.setValue(fileName, content);
-    } else {
-        const files = parseCodeOutput(content);
-        if (files.length === 0) {
-            currentProject.html = content;
+    ] : currentProject.files, instructions.includes(prompt) ? 'This will be the first version.' : prompt);
+    for (const output of outputs) {
+        const existing = currentProject.files.find(({ filename }) => filename === output.filename);
+        if (existing) {
+            existing.content = output.content;
         } else {
-            files.forEach(file => {
-                const component = findComponentByFileName(file.filename);
-                if (component) {
-                    component.code = file.content;
-                } else {
-                    currentProject.components.push({
-                        fileName: file.filename,
-                        title: file.filename,
-                        code: file.content,
-                    });
-                }
-            });
+            currentProject.files.push(output);
         }
-        updateUIForProject(currentProject);
-        saveProject(currentProject);
-        runProject(currentProject);
+        if (isComponent && output.filename === fileName) {
+            codeEditor.setValue(fileName, output.content);
+        }
     }
     if (currentProject.shared) {
         if (!currentProject.history) currentProject.history = [];
@@ -445,16 +378,37 @@ async function updateContent(prompt, context = []) {
         currentProject.shared = undefined;
     }
     await saveProject(currentProject);
+    if (!isComponent) {
+        await openProject(currentProject.id);
+    }
 }
 
 // Function to send a message
 async function sendMessage(user = false) {
-    const loadImages = [];
+    let value = messageInput.value.trim();
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    clearTimeout(autoSendSpeechTimer);
+    const images = [], context = [];
     if (selectedFiles.length > 0) {
         for (const file of selectedFiles) {
-            const fileText = `File attached: ${file.name} (${file.size} bytes)`;
-            const downloadButton = createDownloadButton(file);
-            currentProject.messages.push(addMessage(fileText, true, downloadButton));
+            const fileText = `File attached: ${file.name}`;
+            let previewElement;
+            if (file.url) {
+                previewElement = document.createElement('img');
+                previewElement.src = file.url;
+                previewElement.style.maxWidth = '100%';
+                previewElement.style.height = 'auto';
+                images.push(file.url);
+            } else if (file.text) {
+                previewElement = document.createElement('pre');
+                previewElement.textContent = file.text.slice(0, 1000);
+                previewElement.title = file.text;
+                previewElement.style.maxWidth = '100%';
+                previewElement.style.overflow = 'auto';
+                context.push(`## Attached File: ${file.name}\n\`\`\`\n${file.text}\n\`\`\``);
+            }
+            currentProject.messages.push(addMessage(fileText, true, previewElement));
             if (file.type.indexOf('image') === 0) {
                 const reader = new FileReader();
                 loadImages.push(new Promise((resolve) => {
@@ -469,40 +423,181 @@ async function sendMessage(user = false) {
         filePreview.textContent = '';
         selectedFiles = [];
     }
-    let value = messageInput.value.trim();
-    const context = [];
-    if (loadImages.length > 0) {
-        const images = await Promise.all(loadImages);
-        const description = await executePrompt('Analyzing Images...', value, [], images);
+    if (images.length > 0) {
+        const description = await executePrompt('Analyzing Images...', value, undefined, images);
         context.push(description);
     }
-    if (value) {
-        messageInput.value = '';
-        messageInput.style.height = 'auto';
-        await updateContent(value, context);
-    }
+    await updateContent(value || 'Updates and improvements', context);
 }
 
-// Function to visualize audio input
-function visualizeAudio(stream) {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioContext.createMediaStreamSource(stream);
-    const analyser = audioContext.createAnalyser();
-    source.connect(analyser);
-    analyser.fftSize = 256;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+// Function to create a speech to text converter
+function speechToTextarea(textarea, visualizationElement, onStart, onStop) {
+    let isRecording = false;
+    let mediaStream = null;
+    let audioContext = null;
+    let animationId = null;
+    let speechRecognition = null;
 
-    function draw() {
+    const handleSpeechResult = (event) => {
+        const transcript = Array.from(event.results)
+            .map((result) => result[0].transcript)
+            .join('');
+
+        textarea.value = transcript;
+    };
+
+    const handleSpeechEnd = () => {
+        // Stop visualization and cleanup
+        stop();
+    };
+
+    const initSpeechRecognition = () => {
+        const SpeechRecognition =
+            window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert('Speech recognition is not supported in this browser.');
+            return;
+        }
+
+        speechRecognition = new SpeechRecognition();
+        speechRecognition.lang = 'en-US';
+        speechRecognition.interimResults = true;
+        speechRecognition.maxAlternatives = 1;
+
+        speechRecognition.addEventListener('result', handleSpeechResult);
+        speechRecognition.addEventListener('end', handleSpeechEnd);
+        speechRecognition.addEventListener('error', (event) => {
+            console.error('Speech recognition error:', event.error);
+            stop();
+        });
+    };
+
+    const initAudioVisualization = async () => {
+        try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+            });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(mediaStream);
+            const analyser = audioContext.createAnalyser();
+            source.connect(analyser);
+
+            analyser.fftSize = 2048;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            const canvas = visualizationElement;
+            const canvasCtx = canvas.getContext('2d');
+
+            canvas.style.display = 'block';
+
+            const draw = () => {
+                if (!isRecording) return;
+
+                animationId = requestAnimationFrame(draw);
+
+                analyser.getByteTimeDomainData(dataArray);
+
+                canvasCtx.fillStyle = 'rgb(255, 255, 255)';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+                canvasCtx.lineWidth = 2;
+                canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
+
+                canvasCtx.beginPath();
+
+                const sliceWidth = (canvas.width * 1.0) / bufferLength;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = (v * canvas.height) / 2;
+
+                    if (i === 0) {
+                        canvasCtx.moveTo(x, y);
+                    } else {
+                        canvasCtx.lineTo(x, y);
+                    }
+
+                    x += sliceWidth;
+                }
+
+                canvasCtx.lineTo(canvas.width, canvas.height / 2);
+                canvasCtx.stroke();
+            };
+
+            draw();
+        } catch (error) {
+            console.error('Error initializing audio visualization:', error);
+            stop();
+        }
+    };
+
+    const stopAudioVisualization = () => {
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+
+        const canvasCtx = visualizationElement.getContext('2d');
+        canvasCtx.clearRect(
+            0,
+            0,
+            visualizationElement.width,
+            visualizationElement.height
+        );
+        visualizationElement.style.display = 'none';
+    };
+
+    const start = () => {
+        if (isRecording) return;
+
+        isRecording = true;
+
+        // Initialize speech recognition
+        initSpeechRecognition();
+
+        // Start speech recognition
+        speechRecognition.start();
+
+        // Initialize audio visualization
+        initAudioVisualization();
+
+        if (onStart) onStart();
+    };
+
+    const stop = () => {
         if (!isRecording) return;
-        requestAnimationFrame(draw);
-        analyser.getByteFrequencyData(dataArray);
-        let sum = dataArray.reduce((a, b) => a + b, 0);
-        let average = sum / bufferLength;
-        audioVisualizer.style.height = `${average}px`;
-        audioVisualizer.style.backgroundColor = `hsl(${average}, 100%, 50%)`;
-    }
-    draw();
+
+        isRecording = false;
+
+        // Stop speech recognition
+        speechRecognition.stop();
+
+        // Stop audio visualization
+        stopAudioVisualization();
+
+        if (onStop) onStop();
+
+        // Cleanup media stream
+        if (mediaStream) {
+            mediaStream.getTracks().forEach((track) => track.stop());
+            mediaStream = null;
+        }
+
+        // Cleanup audio context
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+
+        // Remove event listeners
+        speechRecognition.removeEventListener('result', handleSpeechResult);
+        speechRecognition.removeEventListener('end', handleSpeechEnd);
+        speechRecognition = null;
+    };
+
+    return { start, stop };
 }
 
 // Function to get HTML content from text
@@ -557,28 +652,31 @@ function handleError(e, source, lineno, colno, err) {
             const lineNumber = lineno - 1;
             const lines = html.split('\n');
             let currentLine = 0;
-            for (const component of currentProject.components) {
-                currentLine += component.code.split('\n').length;
-                if (currentLine > lineNumber) {
-                    const index = lineNumber - (currentLine - component.code.split('\n').length);
-                    const errorLine = component.code.split('\n')[index];
-                    const errorIndex = lines.findIndex(line => line.includes(errorLine));
+            for (const component of currentProject.files) {
+                const componentLines = component.content.split('\n');
+                const index = lineNumber - currentLine;
+                currentLine += componentLines.length;
+                if (currentLine > lineNumber && index > -1 && index < componentLines.length) {
+                    const errorLine = componentLines[index];
+                    const errorIndex = componentLines.findIndex(line => line.includes(errorLine));
                     if (errorIndex !== -1) {
-                        codeEditor.openFile(component.fileName);
+                        codeEditor.openFile(component.filename);
                         codeEditor.setPosition({ lineNumber: errorIndex + 1, column: errorLine.indexOf(')') + 1 });
-                        togglePreview(false);
                         break;
                     }
                 }
             }
         } else {
-            codeEditor.openFile(currentProject.components[0].fileName);
-            togglePreview(false);
+            codeEditor.openFile(currentProject.files[0].filename);
         }
+        errorMessage.style.display = 'none';
+        togglePreview(false);
+        toggleSidePanel(false);
     };
     const button = document.createElement('button');
     button.textContent = '🛠️ Fix it';
-    button.classList.add('btn', 'is-error');
+    button.classList.add('is-primary');
+    button.style.padding = '0.5rem 1rem';
     button.onclick = () => {
         messageInput.value = error;
         errorMessage.style.display = 'none';
@@ -589,8 +687,8 @@ function handleError(e, source, lineno, colno, err) {
 };
 
 // Function to execute a prompt
-async function executePrompt(description, prompt, messages, images) {
-    toggleLoader(description);
+async function executePrompt(description, prompt, messages, images, files, input) {
+    toggleLoader(true, description);
     let content = '';
     try {
         const response = await fetch('/api', {
@@ -598,7 +696,12 @@ async function executePrompt(description, prompt, messages, images) {
                 'Content-Type': 'application/json'
             },
             method: 'POST',
-            body: JSON.stringify({
+            body: JSON.stringify(files ? {
+                title: prompt,
+                input,
+                files,
+                context: messages,
+            } : {
                 prompt,
                 messages,
                 images
@@ -620,8 +723,10 @@ function toggleLoader(show = true, text) {
     if (loaderCount < 0) loaderCount = 0;
     if (loaderCount === 0) {
         loaderContainer.style.display = 'none';
+        document.querySelectorAll('.control-buttons button').forEach(button => button.disabled = false);
     } else {
         loaderContainer.style.display = 'flex';
+        document.querySelectorAll('.control-buttons button').forEach(button => button.disabled = true);
     }
     if (text) {
         loaderContainer.dataset.status = text.replace(/\n/g, '<br>');
@@ -633,11 +738,25 @@ function toggleWorkspace(show = true) {
     projectList.style.display = show ? 'none' : 'block';
     document.body.classList.toggle('workspace', show);
     toggleSidePanel(show && document.body.clientWidth > 768);
+    if (!show) {
+        currentProject = undefined;
+        codeEditor?.clear();
+        codeEditor = undefined;
+        projectTitle.innerText = 'YouSayAIDo.com';
+        projectTitle.title = 'YouSayAIDo.com';
+        sidePanelContent.innerHTML = '';
+        dynamicContent.innerHTML = '';
+        errorMessage.style.display = 'none';
+        loaderContainer.style.display = 'none';
+    }
 }
 
-function toggleSidePanel(show = true) {
-    sidePanelContent.style.display = show ? 'flex' : 'none';
-    sidePanelContent.classList.toggle('collapsed', !show);
+function toggleSidePanel(show) {
+    if (show === undefined) {
+        show = sidePanel.style.display === 'none';
+    }
+    sidePanel.style.display = show ? 'flex' : 'none';
+    sidePanel.classList.toggle('collapsed', !show);
 }
 
 // Cache management functions
@@ -672,38 +791,64 @@ async function loadFileFromCache(fileName) {
 }
 
 function togglePreview(isPreviewVisible) {
-    closeButton.style.display = isPreviewVisible ? 'none' : 'block';
     editorContent.classList.toggle('open', !isPreviewVisible);
+    toggleSidePanel(!isPreviewVisible);
+    if (!isPreviewVisible) {
+        stopProject();
+    }
 }
 
 function getProjectHtml(project) {
-    if (project.html) return project.html;
+    console.log('getProjectHtml(project)', project);
 
-    const elements = { main: 'div' };
+    const elements = { main: 'div' }, html = [];
     const styles = [];
     const scripts = [];
 
-    console.log('Running project:', project.components);
+    console.log('Running project:', project.files);
 
-    project.components.forEach(c => {
-        if (c.type === 'css') {
-            styles.push(c.code);
-        } else if (c.type === 'javascript') {
-            scripts.push(c.code);
-        } else {
-            const lines = c.code.split('\n');
+    project.files.forEach(c => {
+        if (c.language === 'css') {
+            styles.push(c.content);
+        } else if (c.language === 'javascript') {
+            const newLines = [];
+            const lines = c.content.split('\n');
             lines.forEach((line, i) => {
                 if (line.includes('document.getElementById')) {
                     const next = lines[i + 1];
                     let id = (line.split('(')[1] || '').split(')')[0];
                     if (id[0] === "'") {
                         id = id.slice(1, -1);
-                        elements[id] = next && next.includes('getContext') ? 'canvas' : 'div';
+                        elements[id] = line.includes('getContext') || (next && next.includes('getContext')) ? 'canvas' : 'div';
                     }
+                    newLines.push(line);
+                } else if (line.includes('import')) {
+                    newLines.push(`// ${line}`);
+                } else if (line.includes('export')) {
+                    newLines.push(line.replace('export default ', '').replace('export ', ''));
+                } else if (line.startsWith('const ')) {
+                    newLines.push(line.replace('const ', 'var '));
+                } else {
+                    newLines.push(line);
                 }
             });
+            scripts.unshift(newLines.join('\n'));
+        } else if (c.language === 'html') {
+            const body = getHtmlTag(c.content, 'body');
+            if (body) {
+                html.push(body.replace('<body>', '').replace('</body>', ''));
+            } else {
+                html.push(c.content);
+            }
+        } else {
+            console.log('Unsupported file type:', c.language, c);
         }
     });
+
+    const projectHtml = html.join('\n');
+    if (projectHtml && styles.length === 0 && scripts.length === 0) {
+        return projectHtml;
+    }
 
     const description = project.description ? removeMarkdown(removeLines(removeQuotes(project.description))) : project.title;
 
@@ -720,7 +865,8 @@ function getProjectHtml(project) {
     </style>
 </head>
 <body>
-    ${Object.keys(elements).map(id => `<${elements[id]} id="${id}"></${elements[id]}>`).join('\n    ')}
+    ${projectHtml}
+    ${Object.keys(elements).filter(id => !projectHtml.includes(`id="${id}"`)).map(id => `<${elements[id]} id="${id}"></${elements[id]}>`).join('\n    ')}
     <script>
         ${scripts.join('\n\n')}
     </script>
@@ -731,6 +877,7 @@ function getProjectHtml(project) {
 function previewHTML(htmlContent, showPreview = true) {
     console.log('Previewing HTML:', htmlContent);
     dynamicContent.innerHTML = '';
+    dynamicContent.style.height = (window.innerHeight - 275) + 'px';
     errorMessage.style.display = 'none';
     const iframe = document.createElement('iframe');
     iframe.style.width = '100%';
@@ -738,7 +885,7 @@ function previewHTML(htmlContent, showPreview = true) {
     iframe.style.border = 'none';
     dynamicContent.appendChild(iframe);
     if (showPreview) togglePreview(true);
-    toggleLoader('Loading Preview...');
+    toggleLoader(true, 'Loading Preview...');
 
     const iframeDoc = iframe.contentWindow.document;
     iframeDoc.open();
@@ -746,50 +893,36 @@ function previewHTML(htmlContent, showPreview = true) {
     const injectedScript = `
         window.onerror = (message, source, lineno, colno, error) => {
             console.error('An error occurred:', message, source, lineno, colno, error);
-            parent.postMessage({ type: 'error', message }, '*');
+            parent.postMessage({ type: 'error', message, source, lineno, colno, error }, '*');
             return true;
         };
         document.addEventListener('DOMContentLoaded', () => {
-            const height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+            const height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) + 42;
             parent.postMessage({ type: 'loaded', title: document.title, height }, '*');
         });
     `;
 
-    const injectedStyle = `
-        <style>
-            html, body { 
-                margin: 0; 
-                min-height: 100vh; 
-            }
-            canvas { 
-                width: 100%; 
-                min-height: calc(100vh - 20px);
-            }
-        </style>
-    `;
-
-    iframeDoc.write(injectScriptTag(htmlContent, injectedScript) + injectedStyle);
+    iframeDoc.write(injectScriptTag(htmlContent, injectedScript));
     iframeDoc.close();
 
     window.addEventListener('message', (e) => {
         console.log('Message received:', e.data);
         if (e.data.type === 'loaded') {
             toggleLoader(false);
-            const title = trimText(e.data.title);
-            const height = e.data.height;
-            iframe.style.height = height + 'px';
+            const title = e.data.title;
+            const height = Math.max(e.data.height, window.innerHeight - 275);
             dynamicContent.style.height = height + 'px';
             projectTitle.innerText = title;
             projectTitle.title = title;
         } else if (e.data.type === 'resume') {
             runProject(currentProject);
         } else if (e.data.type === 'error') {
-            handleError(e.data.message);
+            handleError(e.data.message, e.data.source, e.data.lineno, e.data.colno, e.data.error);
         }
     });
 }
 
-async function runProject(project) {
+function runProject(project) {
     togglePreview(true);
     previewHTML(getProjectHtml(project));
     projectIsRunning = true;
@@ -803,33 +936,107 @@ function stopProject() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="YouSayAIDo.com">
     <style>
-        body { display: flex; justify-content: center; align-items: center; height: 100vh; }
+        html, body { margin: 0; font-family: Arial, sans-serif; background-color: #f0f0f0; }
+        body { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 50%; }
         button { font-size: 2rem; padding: 1rem 2rem; background-color: #108de0; color: white; border: none; border-radius: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <button onclick="parent.postMessage({ type: 'resume' });">Resume</button>
+    <h2>
+        <img src="images/yousayaido.png" alt="YouSayAIDo.com" style="height: 1.5em; vertical-align: middle;">
+        <span>You say, AI do!</span>
+    </h2>
+    <button onclick="parent.postMessage({ type: 'resume' });">▶️ Start Application</button>
 </body></html>`, false);
     projectIsRunning = false;
     previewButton.innerText = '▶️';
 }
 
+function attachFile(onFileReceived) {
+    console.log('Attaching file...');
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.txt,.md,.jpg,.jpeg,.png,.html,.css,.js,.json,.csv';
+    fileInput.multiple = true;
+    fileInput.onchange = async (event) => {
+        const files = event.target.files;
+        for (const file of files) {
+            if (file.type.indexOf('image') === 0) {
+                const url = await getImageDataUrl(file);
+                onFileReceived({ name: file.name, type: 'image', url });
+            // } else if (file.type === 'application/pdf') {
+            //     const text = await extractTextFromPDF(file);
+            //     onFileReceived({ name: file.name, type: 'pdf', text });
+            } else {
+                const text = await file.text();
+                const extension = file.name.split('.').pop().replace('.', '');
+                onFileReceived({ name: file.name, type: extension, text });
+            }
+        }
+    };
+    fileInput.click();
+}
+
+async function getImageDataUrl(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+    });
+}
+
+async function extractTextFromPDF(file) {
+    const pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js');
+    console.log('Extracting text from PDF:', pdfjsLib);
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let pdfText = '';
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        pdfText += pageText + '\n';
+    }
+
+    return pdfText;
+}
+
 // Initialize event listeners and functions
 function init() {
+    const speech = speechToTextarea(messageInput, audioVisualizer, () => {
+        audioButton.classList.add('active');
+    }, () => {
+        audioButton.classList.remove('active');
+        if (messageInput.value.trim()) {
+            autoSendSpeechTimer = setTimeout(() => {
+                sendButton.click();
+            }, 300);
+        }
+    });
+    audioButton.addEventListener('click', () => {
+        if (!audioButton.classList.contains('active')) {
+            speech.start();
+        } else {
+            speech.stop();
+        }
+    });
     listProjects();
+    messageInput.focus();
+    if (window.innerWidth < 768) {
+        sidePanelButtons.appendChild(downloadContent);
+        sidePanelButtons.appendChild(shareButton);
+    }
 }
 
 // Event listeners
 messageInput.addEventListener('input', autoSizeTextarea);
 
-menuButton.addEventListener('click', toggleSidePanel);
+menuButton.addEventListener('click', () => toggleSidePanel());
 
-closeButton.addEventListener('click', () => {
-    if (editorContent.classList.contains('open')) {
-        togglePreview(true);
-    } else {
-        togglePreview(false);
-    }
+editButton.addEventListener('click', () => {
+    messageInput.scrollIntoView();
+    messageInput.focus();
 });
 
 previewButton.addEventListener('click', () => {
@@ -860,7 +1067,7 @@ shareButton.addEventListener('click', async () => {
 });
 
 sendButton.addEventListener('click', () => {
-    if (!messageInput.value.trim()) {
+    if (!messageInput.value.trim() && currentProject) {
         messageInput.value = 'improvements, bug fixes, and/or additional features...';
     }
     sendMessage(true);
@@ -873,104 +1080,35 @@ messageInput.addEventListener('keydown', (e) => {
     }
 });
 
-// aiPrompt.addEventListener('paste', (e) => {
-//     const text = e.clipboardData.getData('text');
-//     if (text) {
-//         const html = getHtml(text);
-//         if (html) {
-//             e.preventDefault();
-//             toggleWorkspace();
-//             previewHTML(html);
-//         }
-//     }
-// });
-
 // Event listener to handle file attachments
-attachButton.addEventListener('change', (e) => {
-    const files = e.target.files;
-    for (const file of files) {
-        if (file) {
-            const filePreviewItem = document.createElement('div');
-            filePreviewItem.innerHTML = `<p>File attached: ${file.name} (${file.size} bytes)</p>`;
-            if (file.type.indexOf('image') === 0) {
-                const img = document.createElement('img');
-                img.src = URL.createObjectURL(file);
-                img.classList.add('pixelated');
-                img.style.maxWidth = '150px';
-                img.style.maxHeight = '150px';
-                filePreviewItem.appendChild(img);
-            }
-            const removeButton = document.createElement('button');
-            removeButton.textContent = 'Remove';
-            removeButton.addEventListener('click', () => {
-                filePreviewItem.remove();
-            });
-            filePreviewItem.appendChild(removeButton);
-            filePreview.appendChild(filePreviewItem);
-            filePreview.style.display = 'block';
-            selectedFiles.push(file);
-        }
+attachButton.addEventListener('click', attachFile.bind(null, ({ name, type, url = '', text = '' }) => {
+    const filePreviewItem = document.createElement('div');
+    filePreviewItem.classList.add('file-preview-item');
+    filePreviewItem.innerHTML = `<p>File attached: ${name}</p>`;
+    if (type === 'image' && url) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.style.maxWidth = '150px';
+        img.style.maxHeight = '150px';
+        filePreviewItem.appendChild(img);
     }
-});
-
-// Event listener for audio recording button
-audioButton.addEventListener('click', () => {
-    if (!isRecording) {
-        clearTimeout(recordingSendTimer);
-        if (!speechRecognition) {
-            speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-            speechRecognition.lang = 'en-US';
-            speechRecognition.interimResults = false;
-            speechRecognition.maxAlternatives = 1;
-            speechRecognition.onresult = (event) => {
-                const message = event.results[0][0].transcript.trim();
-                const newPrompt = messageInput.value + ' ' + message;
-                messageInput.value = newPrompt.trim();
-                recordingSendTimer = setTimeout(() => {
-                    sendMessage(true);
-                }, 300);
-            };
-            speechRecognition.onend = () => {
-                mediaRecorder?.stop();
-                isRecording = false;
-                audioButton.textContent = '🎙️';
-                audioVisualizer.style.display = 'none';
-            };
+    const removeButton = document.createElement('button');
+    removeButton.textContent = '❌';
+    removeButton.classList.add('remove');
+    removeButton.addEventListener('click', () => {
+        filePreviewItem.remove();
+        const index = selectedFiles.findIndex(file => file.name === name);
+        if (index !== -1) {
+            selectedFiles.splice(index, 1);
         }
-        speechRecognition.start();
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.start();
-            audioChunks = [];
-            isRecording = true;
-            audioButton.textContent = '⏹️';
-            audioVisualizer.style.display = 'block';
-            visualizeAudio(stream);
+    });
+    filePreviewItem.appendChild(removeButton);
+    filePreview.appendChild(filePreviewItem);
+    filePreview.style.display = 'block';
+    selectedFiles.push({ name, type, text, url });
+}));
 
-            mediaRecorder.addEventListener("stop", () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const audioFile = new File([audioBlob], "recorded_audio.wav", { type: 'audio/wav' });
-                const audioElement = document.createElement('audio');
-                audioElement.controls = true;
-                audioElement.src = URL.createObjectURL(audioFile);
-                if (!currentProject) return;
-                currentProject.messages.push(addMessage(`Audio recorded: recorded_audio.wav (${audioFile.size} bytes)`, true, audioElement, createDownloadButton(audioFile)));
-                saveProject(currentProject);
-            });
-
-            mediaRecorder.addEventListener("dataavailable", event => {
-                audioChunks.push(event.data);
-            });
-        });
-    } else {
-        speechRecognition?.stop();
-        mediaRecorder?.stop();
-        isRecording = false;
-        audioButton.textContent = '🎙️';
-        audioVisualizer.style.display = 'none';
-    }
-});
-
+// Event listener for download button
 downloadContent.addEventListener('click', () => {
     let fileName, code;
     if (editorContent.classList.contains('open')) {

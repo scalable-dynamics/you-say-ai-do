@@ -12,6 +12,8 @@ export default {
 			if (request.method !== 'POST') return new Response('Bad Request', { status: 400 });
 			//console.log('API Request:', url.pathname, env.KV, env.HOSTING);
 			return await connector(request, env.KV, env.HOSTING);
+		} else if (url.pathname === '/images/yousayaido.png' || url.pathname === '/favicon.ico') {
+			return new Response(env.ASSETS.get('images/yousayaido.png'), { headers: { 'Content-Type': 'image/png' } });
 		} else if (url.pathname === '/') {
 			if (request.method !== 'GET') return new Response('Bad Request', { status: 400 });
 			return env.ASSETS.fetch(request);

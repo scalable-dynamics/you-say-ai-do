@@ -9,12 +9,8 @@ body {
     min-height: 100vh;
 }
 
-a {
-    color: #209cee;
-}
-
-a:hover {
-    color: #209cee;
+* {
+    box-sizing: border-box;
 }
 
 .container {
@@ -44,22 +40,11 @@ a:hover {
 
 .container.is-error {
     border: dashed 4px #ff0000;
+    padding: 0 10px;
 }
 
 .container.is-error {
-    color: white !important;
-}
-
-.is-primary {
-    color: #209cee;
-}
-
-.is-error {
-    color: #ff0000;
-}
-
-.is-centered {
-    text-align: center;
+    color: white;
 }
 
 p.title {
@@ -71,7 +56,7 @@ p.title {
     border: solid 2px white;
     border-radius: 10px;
     padding: 10px;
-    margin: 10px;
+    overflow-x: hidden;
 }
 
 .balloon .title {
@@ -89,23 +74,21 @@ p.title {
     gap: 10px;
 }
 
-
-
-#closeButton {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 100;
-}
-
 .toolbar {
-    display: flex;
-    gap: 6px;
-    background-color: #303030;
-    border-bottom: solid 2px white;
     position: sticky;
     top: 0;
     z-index: 100;
+    background-color: #303030;
+    min-height: 40px;
+    flex-wrap: nowrap !important;
+}
+
+#errorMessage {
+    display: none;
+}
+
+#errorMessage.active {
+    display: block;
 }
 
 #errorMessage button {
@@ -124,14 +107,12 @@ p.title {
     transition: width 0.2s ease;
 }
 
-h2.title {
-    padding-top: 5px;
-    font-size: 1.7rem;
+.side-panel .title {
+    font-size: 1.5rem;
     font-weight: bold;
     text-align: center;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
 }
 
 .toggle-panel {
@@ -149,10 +130,11 @@ h2.title {
     position: relative;
     width: 500px;
     margin: 10px auto;
+    margin-bottom: 0;
 }
 
 .workspace .input-container {
-    width: 100%;
+    width: 50%;
 }
 
 #sidePanelContent {
@@ -165,17 +147,15 @@ h2.title {
 }
 
 .message {
-    margin-bottom: 15px;
-    padding: 10px;
+    margin-bottom: 5px;
+    padding: 5px 10px;
     border-radius: 5px;
-    max-width: 80%;
     word-wrap: break-word;
 }
 
 .message.-left {
     background-color: #4a4a4a;
     align-self: flex-end;
-    margin-left: auto;
 }
 
 .message.-right {
@@ -186,45 +166,49 @@ h2.title {
 .message-input {
     flex-grow: 1;
     padding: 10px;
-    margin: 0 10px;
+    margin: 0 5px;
     font-family: inherit;
     resize: none;
-    min-height: 30px;
+    min-height: 80px;
+    max-height: 50vh;
     width: auto;
-    border: 4px solid #209cee;
+    outline: none;
     border-radius: 10px;
     margin-bottom: 10px;
+    border: 2px double #404040;
+}
+
+.message-input:focus {
+    border: 2px solid #209cee;
 }
 
 .spacer {
     flex-grow: 1;
 }
 
-.send-button {
-    margin-left: 10px;
-    align-self: flex-end;
+.toolbar>.title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    text-align: center;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
 }
 
 .control-buttons {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    padding: 0 10px;
-    background-color: #404040;
-    min-height: 50px;
+    align-items: center;
 }
 
-.control-buttons>label {
-    line-height: 45px;
-    padding: 0 10px;
-}
-
-.control-buttons>button,
-.control-buttons>label {
+.control-buttons>button {
+    position: relative;
     margin: 5px;
+    padding: 0 10px;
     min-width: 45px;
-    min-height: 45px;
+    height: 45px;
     white-space: nowrap;
     background-color: #404040;
     border: 2px solid #ffffff;
@@ -235,10 +219,28 @@ h2.title {
     transition: background-color 0.2s;
 }
 
-.control-buttons>button:hover,
-.control-buttons>label:hover{
-    background-color: #505050;
+.control-buttons>button:hover {
+    background-color: #209cee;
+}
 
+.control-buttons>button[data-icon]:hover::before {
+    content: attr(data-icon);
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 25px;
+    height: 25px;
+    line-height: 25px;
+    z-index: 1;
+    text-shadow: 0 0 5px #fff;
+}
+
+
+.control-buttons>button:disabled {
+    background-color: #606060;
+    color: #404040;
+    cursor: not-allowed;
 }
 
 .file-preview,
@@ -250,64 +252,30 @@ h2.title {
     display: none;
 }
 
-.toolbar button {
-    background-color: white;
-}
-
-#menuButton {
-    display: none;
-}
-
-#menuButton {
-    position: fixed;
-    top: 0;
-    left: 0;
-}
-
-.main-content {
-    flex-grow: 1;
-    flex-direction: column;
-    width: 100%;
-    padding-left: 60px;
+.file-preview .file-preview-item {
     position: relative;
-    display: none;
-}
-
-.workspace .main-content {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px;
+    margin: 2px 10px;
+    background-color: #404040;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    color: #ffffff;
+    font-size: 12px;
 }
 
-.main-content .toolbar::before {
-    content: '';
-    background-color: #303030;
-    border-bottom: solid 2px white;
+.file-preview .remove {
     position: absolute;
-    top: 0;
-    left: -60px;
-    bottom: -2px;
-    width: 60px;
-    z-index: -1;
-}
-
-#dynamicContent {
-    width: 100%;
-    height: 100%;
-    overflow: none;
-}
-
-#editorContent {
-    position: absolute;
-    inset: 0;
-    z-index: 100;
-    width: 100%;
-    height: 100%;
-    max-height: calc(100vh - 40px);
-    left: 100%;
-    transition: left 0.3s ease;
-}
-
-#editorContent.open {
-    left: 0;
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    font-size: 12px;
+    cursor: pointer;
 }
 
 .main-content {
@@ -317,7 +285,39 @@ h2.title {
     background-color: #303030;
     border: 4px solid #ffffff;
     border-radius: 10px;
-    margin: 10px;
+    flex-grow: 1;
+    flex-direction: column;
+    width: 100%;
+    position: relative;
+    display: none;
+}
+
+.workspace .main-content {
+    display: flex;
+}
+
+button.active {
+    animation: pulse 1s infinite;
+}
+
+#dynamicContent {
+    width: 100%;
+    min-height: calc(100vh - 260px);
+    overflow: visible;
+}
+
+#editorContent {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    width: 100%;
+    height: 100%;
+    left: 100%;
+    transition: left 0.3s ease;
+}
+
+#editorContent.open {
+    left: 0;
 }
 
 button {
@@ -325,11 +325,62 @@ button {
     min-width: 45px;
     min-height: 45px;
     white-space: nowrap;
+    cursor: pointer;
+}
+
+button>span {
+    padding-left: 10px;
+}
+
+button.is-primary {
+    background-color: #209cee;
+    color: white;
+    border: solid 2px white;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1.2em;
+    transition: background-color 0.2s;
+}
+
+button.is-primary:hover {
+    background-color: #007bff;
+}
+
+a {
+    display: inline-block;
+    margin: 5px;
+    padding: 5px;
+    border: 2px solid transparent;
+    color: #209cee;
+    text-decoration: none;
+}
+
+a:hover {
+    border: 2px solid #209cee;
+}
+
+a:visited {
+    color: #209cee;
 }
 
 .project-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
     align-self: center;
-    max-width: 500px;
+    gap: 10px;
+    padding: 50px;
+    justify-content: center;
+}
+
+.project-list>h2 {
+    color: #ffffff;
+    font-size: 1.5em;
+    text-align: center;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    margin-bottom: 10px;
 }
 
 .project-item {
@@ -337,67 +388,78 @@ button {
     justify-content: space-between;
     align-items: center;
     padding: 2px;
+
+    margin: 2px 10px;
+    width: 450px;
+    background-color: #404040;
+    border: 2px solid #ffffff;
+    border-radius: 5px;
+    color: #ffffff;
+    font-size: 1.2em;
+    transition: background-color 0.2s;
 }
 
-.project-item button {
-    min-height: 25px;
-}
-
-.project-item>*:first-child {
+.project-item>h2 {
+    margin: 0;
+    padding: 10px;
+    font-size: 1em;
     flex-grow: 1;
-}
-
-.project-item>*:first-child:hover {
-    background-color: #209cee;
+    text-align: center;
+    cursor: pointer;
 }
 
 .remove {
-    border-radius: 50%;
-    background-color: #ff0000;
-    color: #ffffff;
+    border: 2px dashed #af3333;
+    color: #af3333;
+    font-weight: bold;
     cursor: pointer;
-    width: 20px;
-    height: 20px;
-    font-size: 12px;
     padding: 0;
-    opacity: 0;
 }
 
-.project-item:hover .remove {
-    opacity: 1;
+input[type="file"] {
+    display: none;
 }
 
 .pixelated {
     image-rendering: pixelated;
 }
 
+.toolbar button {
+    display: none;
+}
+
+.workspace .toolbar button {
+    display: block;
+}
+
 .loading-dialog {
-    display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    position: absolute;
+    position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
     min-width: 300px;
-    max-height: 70vh;
     overflow: auto;
     text-align: center;
     background-color: #303030;
     border: 4px solid #ffffff;
     color: white;
+    display: none;
+    height: 200px;
 }
 
-.loading-dialog::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
+.loading-dialog.active {
+    display: flex;
 }
 
 .loading-dialog[data-status]::after {
     content: attr(data-status);
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
     font-size: 1.2em;
     animation: fade 2s infinite;
 }
@@ -496,14 +558,6 @@ button {
 
 @media screen and (max-width: 768px) {
 
-    #downloadContent span {
-        display: none;
-    }
-
-    .control-buttons>label {
-        line-height: 100%;
-    }
-
     .spacer {
         display: none;
     }
@@ -512,7 +566,34 @@ button {
         width: 100%;
     }
 
-    #menuButton {
-        display: block;
+    .workspace .input-container {
+        width: 100%;
+    }
+
+    .project-list {
+        padding: 0;
+        padding-top: 10px;
+        width: 100%;
+    }
+
+    .project-item {
+        width: 100%;
+    }
+
+    .project-item button {
+        opacity: 1;
+    }
+
+    .input-container {
+        width: 100%;
+    }
+
+    .message-input {
+        margin: 0 10px;
+        margin-bottom: 10px;
+    }
+
+    #editButton span {
+        display: none;
     }
 }

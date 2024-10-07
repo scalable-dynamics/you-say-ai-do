@@ -51,7 +51,7 @@ const hostingParams = {
 const server = http.createServer(async (req, res) => {
     const apiRequest = {
         method: req.method,
-        text(){
+        text() {
             return new Promise((resolve, reject) => {
                 let body = '';
                 req.on('data', (chunk) => body += chunk);
@@ -88,9 +88,20 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/') {
         const indexPath = path.join(__dirname, 'src', 'app.html');
         await readFile(indexPath, 'text/html');
-    } else if (req.url === '/nes.min.css') {
-        const indexPath = path.join(__dirname, 'src', 'nes.min.css');
-        await readFile(indexPath, 'text/css');
+    } else if (req.url === '/images/yousayaido.png' || req.url === '/favicon.ico') {
+        const imagePath = path.join(__dirname, 'src', req.url);
+        await new Promise((resolve, reject) => {
+            fs.readFile(imagePath, (err, data) => {
+                if (err) {
+                    res.writeHead(404, { 'Content-Type': 'text/plain' });
+                    res.end('Not Found');
+                } else {
+                    res.writeHead(200, { 'Content-Type': 'image/png' });
+                    res.end(data);
+                }
+                resolve();
+            });
+        });
     } else if (req.url === '/app.css') {
         const indexPath = path.join(__dirname, 'src', 'app.css');
         await readFile(indexPath, 'text/css');

@@ -4,55 +4,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="favicon" content="images/YouSayAIDoIcon.png">
     <title>YouSayAIDo.com</title>
     <link rel="stylesheet" href="app.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.51.0/min/vs/loader.min.js"></script>
 </head>
 
 <body>
-    <div class="toolbar">
-        <button id="menuButton">≡</button>
-        <h2 class="title" style="flex-grow:1">YouSayAIDo.com</h2>
-        <h2 id="projectTitle" class="title" style="flex-grow:1">YouSayAIDo.com</h2>
-        <button id="previewButton" title="Preview" style="display: none;">
-            <span>▶️</span>
-        </button>
-        <button id="downloadContent" title="Download" style="display: none;">
-            <span>⬇️</span>
-        </button>
-        <button id="shareButton" title="Share Link">
-            <span>🔗</span>
-        </button>
+    <div class="toolbar control-buttons">
+        <button id="menuButton" title="Menu">≡</button>
+        <h2 id="projectTitle" class="title" style="flex-grow:1">
+            <img src="images/yousayaido.png" alt="YouSayAIDo.com" style="height: 1.5em; vertical-align: middle;">
+            <span>You say, AI do!</span>
+        </h2>
+        <button id="editButton" title="Edit" data-icon="✏️">✏️<span>Edit</span></button>
+        <button id="previewButton" title="Preview">▶️<span>Start</span></button>
+        <button id="downloadContent" title="Download" data-icon="⬇️">⬇️<span>Download</span></button>
+        <button id="shareButton" title="Share Link" data-icon="🔗">🔗<span>Share</span></button>
     </div>
-    <div id="errorMessage" class="container is-error" style="display: none;"></div>
+    <div id="errorMessage" class="container is-error"></div>
     <div class="main-content">
-        <div id="sidePanelContent" class="side-panel message-list"></div>
+        <div id="sidePanel" class="side-panel">
+            <h2 class="title">
+                <img src="images/yousayaido.png" alt="YouSayAIDo.com" style="height: 1.5em; vertical-align: middle;">
+                <span>You say, AI do!</span>
+            </h2>
+            <div class="control-buttons"></div>
+            <div id="sidePanelContent" class="message-list"></div>
+        </div>
         <div id="dynamicContent"></div>
         <div id="editorContent"></div>
-        <button id="closeButton" title="Edit" style="display: none;">
-            <span>➡️</span>
-        </button>
     </div>
     <div class="input-container">
-        <div id="audioVisualizer" class="audio-visualizer"></div>
+        <canvas id="audioVisualizer" class="audio-visualizer"></canvas>
         <div id="filePreview" class="file-preview"></div>
         <textarea id="messageInput" class="message-input"
             placeholder="Type, Talk, or Add Files to make changes..."></textarea>
         <div class="control-buttons">
-            <input type="file" id="attachButton" style="display: none;">
-            <label for="attachButton" title="Attach files">📎 Attach</label>
+            <button id="attachButton" title="Attach files" data-icon="📎">📎<span>Attach</span></button>
             <div class="spacer"></div>
-            <button id="audioButton" title="Talk about it">🎙️ Speak</button>
+            <button id="audioButton" title="Talk about it" data-icon="🎙️">🎙️<span>Speak</span></button>
             <div class="spacer"></div>
-            <button id="sendButton" class="send-button is-primary">🪄 Update</button>
+            <button id="sendButton" class="send-button is-primary" data-icon="🪄">🪄<span>Update</span></button>
         </div>
     </div>
     <div id="projectList" class="project-list"></div>
-    <div id="loaderContainer" class="loading-dialog container" style="display: none;">
+    <div id="loaderContainer" class="loading-dialog container">
         <div class="loading-bar"></div>
         <div class="loader"></div>
     </div>
-    <script src="app.js"></script>
+    <script src="app.js" type="module"></script>
 </body>
 
 </html>
