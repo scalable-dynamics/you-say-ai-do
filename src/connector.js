@@ -32,7 +32,7 @@ async function connector(request, KV, R2) {
             });
         }
         else if (requestData.conversation) {
-            const messages = typeof (requestData.conversation) === 'string' ? [{ role, content: requestData.conversation }] : requestData.conversation;
+            const messages = typeof (requestData.conversation) === 'string' ? [{ role: 'user', content: requestData.conversation }] : requestData.conversation;
             const response = await executeClaudePrompt(ClaudeUrl, ClaudeHeaders, ClaudeModel, messages, 1000, true, chat_prompt);
             return new Response(response, { headers: { 'Content-Type': 'plain/text' } });
         } else if (requestData.prompt || requestData.messages || requestData.images) {
@@ -52,8 +52,30 @@ async function connector(request, KV, R2) {
                 return new Response(JSON.stringify(description), { headers: { 'Content-Type': 'application/json' } });
             }
             console.log(messages);
-            const code = await executeClaudePrompt(ClaudeUrl, ClaudeHeaders, ClaudeModel, messages, 8192, false);
-            return new Response(JSON.stringify(code), { headers: { 'Content-Type': 'application/json' } });
+            const response = await executeClaudePrompt(ClaudeUrl, ClaudeHeaders, ClaudeModel, messages, 8192, false);
+            const files = parseMarkdownFiles(response);
+            return new Response(JSON.stringify(files), { headers: { 'Content-Type': 'application/json' } });
+        } else if (requestData.title && requestData.input && requestData.files) {
+            const codeBlocks = [];
+            for (const file of requestData.files) {
+                const { filename, extension, content } = file;
+                const comment = extension === 'html' || extension === 'svg' ? `<!-- ${filename} -->` : extension === 'css' ? `/* ${filename} */` : `// ${filename}`;
+                codeBlocks.push(`\`\`\`${extension === 'js' ? 'javascript' : extension}\n${comment}\n${content}\n\`\`\``);
+            }
+            const markdown = codeBlocks.join('\n\n');
+            const context = requestData.context || [];
+            const response = await executeClaudePrompt(ClaudeUrl, ClaudeHeaders, ClaudeModel, markdown.trim() ? [
+                { role: 'user', content: requestData.title },
+                { role: 'assistant', content: markdown },
+                ...context.map((content) => ({ role: 'user', content: content })),
+                { role: 'user', content: requestData.input }
+            ] : [
+                { role: 'user', content: requestData.title },
+                ...context.map((content) => ({ role: 'user', content: content })),
+                { role: 'user', content: requestData.input },
+            ], 8192, false);
+            const files = parseMarkdownFiles(response);
+            return new Response(JSON.stringify(files), { headers: { 'Content-Type': 'application/json' } });
         } else {
             return new Response('Bad Request', { status: 400 });
         }
@@ -271,6 +293,150 @@ function extractCode(markdownText, onCodeBlockFound) {
             onCodeBlockFound({ text: codeBlock, type: language });
         }
     }
+}// markdownParser.js
+
+/**
+ * Parses markdown code fences and tables into an array of file objects.
+ * @param {string} markdownText - The markdown content to parse.
+ * @returns {Array} Array of file objects.
+ */
+function parseMarkdownFiles(markdownText) {
+    const files = [];
+
+    // Regular expression to match code fences
+    const codeFenceRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    let codeMatch;
+    while ((codeMatch = codeFenceRegex.exec(markdownText)) !== null) {
+        const language = codeMatch[1] ? codeMatch[1].trim() : '';
+        let content = codeMatch[2];
+
+        // Only process specific languages
+        if (['html', 'css', 'js', 'javascript', 'svg'].includes(language.toLowerCase())) {
+            // Extract file name from the first line comment
+            const { fileName, cleanedContent } = extractFileNameFromContent(content, language);
+            if (!fileName) continue;
+
+            content = cleanedContent;
+
+            // Determine file extension
+            const extension = fileName.split('.').pop();
+
+            // Add the file to the array
+            files.push({
+                filename: fileName,
+                extension: extension,
+                language: language,
+                content: content.trim(),
+                mimeType: language === 'html' ? 'text/html'
+                    : language === 'css' ? 'text/css'
+                        : language === 'svg' ? 'image/svg+xml'
+                            : language === 'json' ? 'application/json'
+                                : 'text/javascript',
+            });
+        }
+    }
+
+    // Regular expression to match markdown tables
+    const tableRegex = /((?:\|.*?\|\n)+)/g;
+    let tableMatch;
+    while ((tableMatch = tableRegex.exec(markdownText)) !== null) {
+        const tableText = tableMatch[1];
+
+        // Convert the markdown table to JSON
+        const jsonData = parseMarkdownTableToJson(tableText);
+        if (jsonData.length === 0) continue;
+
+        // Generate a file name
+        const fileName = `table${files.length + 1}.json`;
+
+        files.push({
+            filename: fileName,
+            extension: 'json',
+            language: 'json',
+            content: JSON.stringify(jsonData, null, 2),
+        });
+    }
+
+    return files;
+}
+
+/**
+ * Extracts the file name from the first line comment and cleans the content.
+ * @param {string} content - The content of the code fence.
+ * @param {string} language - The language of the code fence.
+ * @returns {Object} An object containing the file name and cleaned content.
+ */
+function extractFileNameFromContent(content, language) {
+    const lines = content.split('\n');
+    let firstLine = lines[0].trim();
+    let fileName = '';
+
+    // Determine comment syntax based on language
+    let commentStart = '';
+    let commentEnd = '';
+    if (['js', 'javascript'].includes(language.toLowerCase())) {
+        commentStart = '//';
+    } else if (['html', 'svg'].includes(language.toLowerCase())) {
+        commentStart = '<!--';
+        commentEnd = '-->';
+    } else if (language.toLowerCase() === 'css') {
+        commentStart = '/*';
+        commentEnd = '*/';
+    }
+
+    // Extract file name from comment in first line
+    if (firstLine.startsWith(commentStart)) {
+        if (commentEnd) {
+            const endCommentIndex = firstLine.indexOf(commentEnd);
+            if (endCommentIndex !== -1) {
+                fileName = firstLine.substring(commentStart.length, endCommentIndex).trim();
+            }
+        } else {
+            fileName = firstLine.substring(commentStart.length).trim();
+        }
+
+        // Remove the comment from content
+        lines.shift();
+        content = lines.join('\n');
+    }
+
+    return { fileName, cleanedContent: content };
+}
+
+/**
+ * Converts a markdown table into a JSON object.
+ * @param {string} tableText - The markdown table text.
+ * @returns {Array} An array of objects representing the table data.
+ */
+function parseMarkdownTableToJson(tableText) {
+    const lines = tableText.trim().split('\n');
+    if (lines.length < 2) {
+        return [];
+    }
+
+    const headerLine = lines[0];
+    const separatorLine = lines[1];
+    const dataLines = lines.slice(2);
+
+    const headers = headerLine
+        .split('|')
+        .map((h) => h.trim())
+        .filter((h) => h);
+
+    const data = dataLines.map((line) => {
+        const cells = line
+            .split('|')
+            .map((c) => c.trim())
+            .filter((c) => c);
+
+        const row = {};
+        headers.forEach((header, index) => {
+            row[header] = cells[index] || '';
+        });
+        return row;
+    });
+
+    return data;
 }
 
 var image_prompt = `Describe this image for an LLM that will use this information to create a web page, app or game using HTML, SVG, WebGL+Shaders, CSS, and vanilla JavaScript.`;
@@ -316,7 +482,7 @@ Embrace a tone of open-ended creativity, thoughtful exploration, playfulness, an
    - **Filename Comments:** At the top of each code block, include a comment specifying the filename and its purpose.
    - **Example:**
 \`\`\`javascript
-// File: calculator.js
+// ./calculator.js
 export function calculate() {
     // Calculation logic
 }
@@ -327,7 +493,7 @@ export function calculate() {
    - **Standards:** Use semantic elements, unique IDs, and classes as specified.
    - **Example:**
 \`\`\`html
-<!-- File: display.html -->
+<!-- ./index.html -->
 <div id="calculator-display" class="component-display"></div>
 \`\`\`
 
@@ -336,7 +502,7 @@ export function calculate() {
    - **Standards:** Follow the provided naming conventions and ensure no style conflicts.
    - **Example:**
 \`\`\`css
-/* File: display.css */
+/* ./display.css */
 .component-display {
     font-size: 2em;
     color: #333;
@@ -348,7 +514,7 @@ export function calculate() {
    - **Standards:** Implement the standardized interface for interoperability.
    - **Example:**
 \`\`\`javascript
-// File: display.js
+// ./display.js
 export function updateDisplay(value) {
     document.getElementById('calculator-display').innerText = value;
 }
@@ -359,7 +525,7 @@ export function updateDisplay(value) {
    - **Standards:** Ensure optimization and compatibility with HTML5.
    - **Example:**
 \`\`\`javascript
-// File: effects.js
+// ./effects.js
 // WebGL or SVG related code
 \`\`\`
 
@@ -368,7 +534,7 @@ export function updateDisplay(value) {
    - **Standards:** Provide clear and concise documentation for future maintenance.
    - **Example:**
 \`\`\`markdown
-<!-- File: display.md -->
+<!-- display.md -->
 # Display Component Documentation
     - **Purpose:** Updates the calculator display.
     - **Usage:** Import \`updateDisplay\` from \`display.js\` and call it with the desired value.
@@ -384,16 +550,16 @@ export function updateDisplay(value) {
 1. HTML5 Component Development:
 
 \`\`\`html
-<!-- File: display.html -->
-<link rel="stylesheet" href="styles/display.css">
+<!-- ./index.html -->
+<link rel="stylesheet" href="./styles/display.css">
 <div id="calculator-display" class="component-display"></div>
-<script src="modules/display.js" type="module"></script>
+<script src="./modules/display.js" type="module"></script>
 \`\`\`
 
 2. CSS3 Styling:
 
 \`\`\`css
-/* File: styles/display.css */
+/* ./styles/display.css */
 .component-display {
   font-size: 2em;
   color: #333;
@@ -403,7 +569,7 @@ export function updateDisplay(value) {
 3. Vanilla JavaScript Functionality:
 
 \`\`\`javascript
-// File: modules/display.js
+// ./modules/display.js
 export function updateDisplay(value) {
   document.getElementById('calculator-display').innerText = value;
 }
